@@ -1,0 +1,16 @@
+[package]
+name = "clog"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "mkrepo"
+path = "src/bin/mkrepo.rs"
+
+[dependencies]
+anyhow = "1.0.99"
+clap = { version = "4.5.47", features = ["derive"] }
+git2 = { version = "0.20.2",  default-features = false }
+inquire = "0.7.5"
+names = { version = "0.14.0", default-features = false }
+tempfile = "3.21.0"
