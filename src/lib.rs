@@ -7,7 +7,6 @@ use std::{
     vec,
 };
 
-use anyhow::anyhow;
 use git2::{Commit, Oid, Repository, Signature, Sort};
 use regex::Regex;
 
@@ -68,9 +67,9 @@ pub struct Patterns {
 impl Default for Patterns {
     fn default() -> Self {
         Self {
-            major: vec![Regex::new(r"^.*!:.*$").unwrap()],
-            minor: vec![Regex::new(r"^feat:.*$").unwrap()],
-            patch: vec![Regex::new(r"^fix:.*$").unwrap()],
+            major: vec![Regex::new(r"^.*!:").unwrap()],
+            minor: vec![Regex::new(r"^feat:").unwrap()],
+            patch: vec![Regex::new(r"^fix:").unwrap()],
         }
     }
 }

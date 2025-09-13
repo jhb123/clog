@@ -19,12 +19,12 @@ impl Project for CargoProject {
     fn from_dir(path: &Path) -> anyhow::Result<Self> {
         let mut cargo_path = path.to_path_buf();
         cargo_path.push("cargo.toml");
-        let raw_file: String = fs::read_to_string(path)?;
+        let raw_file: String = fs::read_to_string(&cargo_path)?;
 
         let toml = raw_file.parse::<Table>()?;
 
         let project = toml
-            .get("project")
+            .get("package")
             .and_then(|val| val.as_table())
             .ok_or_else(|| anyhow!("missing [project] section"))?;
 
