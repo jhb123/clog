@@ -55,10 +55,9 @@ fn simple_repo(path: &Path) -> anyhow::Result<()> {
     } else {
         empty_commit(&repo, "feat: initial commit")?;
     }
-
-    empty_commit(&repo, "feat: initial commit")?;
     empty_commit(&repo, "fix: correct logic in parser")?;
     empty_commit(&repo, "docs: add README")?;
+    empty_commit(&repo, "feat!: breaking change")?;
     empty_commit(&repo, "chore: cleanup build script")?;
 
     Ok(())
@@ -80,9 +79,21 @@ fn branches_repo(path: &Path) -> anyhow::Result<()> {
 
     let feature_commit = make_branch(&repo, &branch_name, |repo| {
         empty_commit(repo, "feat: add feature A")?;
-        empty_commit(repo, "fix: bug in A")?;
+        empty_commit(repo, "fix!: bug in A")?;
         empty_commit(repo, "chore: formatting for feature A")
     })?;
+
+    let branch_name = generator.next().unwrap();
+    let feature_commit_2 = make_branch(&repo, &branch_name, |repo| {
+        empty_commit(repo, "feat: add feature B")?;
+        empty_commit(repo, "fix: bug in B")?;
+        empty_commit(repo, "chore: formatting for feature B")
+    })?;
+
+    // switch back to main
+    repo.set_head("refs/heads/main")?;
+    // updates head ref and updates the working dir + index etc.
+    repo.checkout_head(Some(CheckoutBuilder::default().force()))?;
 
     // Commit on main to make history interesting
     empty_commit(&repo, "chore: update CI config")?;
@@ -91,8 +102,16 @@ fn branches_repo(path: &Path) -> anyhow::Result<()> {
 
     merge_commits(
         &repo,
-        "merge: feature branch",
+        "merge: feature branch A",
         &[&master_commit, &feature_commit],
+    )?;
+
+    let master_commit = repo.head()?.peel_to_commit()?;
+
+    merge_commits(
+        &repo,
+        "merge: feature branch B",
+        &[&master_commit, &feature_commit_2],
     )?;
 
     Ok(())
@@ -183,9 +202,8 @@ fn empty_commit(repo: &Repository, message: &str) -> anyhow::Result<Oid> {
     Ok(commit_id)
 }
 
-/// Creates a new branch from `main`, checks it out, and runs a user-provided closure
-/// to perform commits or changes on that branch. After the closure finishes, the
-/// branch is left in place but `HEAD` is restored back to `main`.
+/// Creates a new branch from `HEAD`, checks it out, and runs a user-provided closure
+/// to perform commits or changes on that branch.
 fn make_branch<'a, F>(repo: &'a Repository, name: &'a str, f: F) -> anyhow::Result<Commit<'a>>
 where
     F: FnOnce(&Repository) -> anyhow::Result<Oid>,
@@ -201,11 +219,6 @@ where
     repo.checkout_head(Some(CheckoutBuilder::default().force()))?;
     f(repo)?;
     let branch_commit = repo.head()?.peel_to_commit()?;
-
-    // switch back to main
-    repo.set_head("refs/heads/main")?;
-    // updates head ref and updates the working dir + index etc.
-    repo.checkout_head(Some(CheckoutBuilder::default().force()))?;
 
     Ok(branch_commit)
 }

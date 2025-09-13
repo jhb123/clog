@@ -2,6 +2,11 @@
 name = "clog"
 version = "0.1.0"
 edition = "2021"
+default-run = "clog"
+
+[[bin]]
+name = "clog"
+path = "src/main.rs"
 
 [[bin]]
 name = "mkrepo"
@@ -12,5 +17,9 @@ anyhow = "1.0.99"
 clap = { version = "4.5.47", features = ["derive"] }
 git2 = { version = "0.20.2",  default-features = false }
 inquire = "0.7.5"
+itertools = "0.14.0"
 names = { version = "0.14.0", default-features = false }
+regex = "1.11.2"
 tempfile = "3.21.0"
+toml = "0.9.5"
+toml_edit = "0.23.4"
