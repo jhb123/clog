@@ -3,7 +3,10 @@ use std::path::PathBuf;
 use anyhow::{anyhow, Context, Error};
 use clap::Parser;
 use clog::{
-    detect_project, get_prev_clog_bump, make_bump_commit, make_initial_commit, parse_commit_message, repo_has_commits, repo_is_clean, semver::{SemVer, SemVerBump}, Config, Project
+    detect_project, get_prev_clog_bump, make_bump_commit, make_initial_commit,
+    parse_commit_message, repo_has_commits, repo_is_clean,
+    semver::{SemVer, SemVerBump},
+    Config, Project,
 };
 use git2::{Repository, Sort};
 use inquire::Confirm;

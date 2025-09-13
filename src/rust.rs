@@ -53,7 +53,7 @@ impl Project for CargoProject {
     fn write(&self) -> anyhow::Result<()> {
         let content = fs::read_to_string(&self.path)?;
         let mut doc = content.parse::<DocumentMut>()?;
-        doc["project"]["version"] = toml_edit::value(self.version.to_string());
+        doc["package"]["version"] = toml_edit::value(self.version.to_string());
         fs::write(&self.path, doc.to_string())?;
         Ok(())
     }

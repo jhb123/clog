@@ -104,7 +104,7 @@ fn is_clog_bump(commit: &Commit) -> bool {
     }
 }
 
-pub fn repo_is_clean(repo: &Repository ) -> anyhow::Result<bool> {
+pub fn repo_is_clean(repo: &Repository) -> anyhow::Result<bool> {
     let mut opts = StatusOptions::new();
     opts.include_untracked(true)
         .recurse_untracked_dirs(true)
@@ -112,7 +112,6 @@ pub fn repo_is_clean(repo: &Repository ) -> anyhow::Result<bool> {
     let statuses = repo.statuses(Some(&mut opts))?;
     Ok(statuses.is_empty())
 }
-
 
 pub fn get_prev_clog_bump(repo: &Repository, upto_oid: Oid) -> anyhow::Result<Option<Oid>> {
     let mut revwalk = repo.revwalk()?;
