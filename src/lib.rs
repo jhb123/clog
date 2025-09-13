@@ -7,7 +7,7 @@ use std::{
     vec,
 };
 
-use git2::{Commit, Oid, Repository, Signature, Sort};
+use git2::{Commit, Oid, Repository, Signature, Sort, StatusOptions};
 use regex::Regex;
 
 use crate::{
@@ -104,18 +104,15 @@ fn is_clog_bump(commit: &Commit) -> bool {
     }
 }
 
-// pub fn get_initial_release(repo: &Repository, upto_oid: Oid) -> anyhow::Result<Option<Oid>> {
-//     let mut revwalk = repo.revwalk()?;
-//     revwalk.set_sorting(Sort::TOPOLOGICAL)?;
-//     revwalk.push(upto_oid)?;
-//     for oid in revwalk.flatten() {
-//         let commit = repo.find_commit(oid)?;
-//         if is_clog_bump(&commit) {
-//             return Ok(Some(commit.id()));
-//         }
-//     }
-//     Ok(None)
-// }
+pub fn repo_is_clean(repo: &Repository ) -> anyhow::Result<bool> {
+    let mut opts = StatusOptions::new();
+    opts.include_untracked(true)
+        .recurse_untracked_dirs(true)
+        .include_ignored(false);
+    let statuses = repo.statuses(Some(&mut opts))?;
+    Ok(statuses.is_empty())
+}
+
 
 pub fn get_prev_clog_bump(repo: &Repository, upto_oid: Oid) -> anyhow::Result<Option<Oid>> {
     let mut revwalk = repo.revwalk()?;
