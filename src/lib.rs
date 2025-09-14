@@ -25,8 +25,57 @@ pub trait Project {
         Self: Sized;
     fn bump(&mut self, bump: SemVerBump);
     fn write(&self) -> anyhow::Result<()>;
-    fn get_version_file(&self) -> PathBuf;
+    fn get_version_file(&self) -> &Path; // needs to be dyn compatible
     fn set_initial_release(&mut self) -> anyhow::Result<()>;
+    fn get_latest_release(&self, repo: &Repository) -> anyhow::Result<Option<Oid>> {
+        let mut revwalk = repo.revwalk()?;
+        revwalk.push_head()?;
+        revwalk.set_sorting(Sort::TOPOLOGICAL)?;
+
+        for oid_result in revwalk {
+            let oid = oid_result?; // fail if object db is corrupt
+                                   // revwalk only has commits because we didn't pass anything
+                                   // apart from commits to the revwalk
+            let commit = repo.find_commit(oid)?;
+
+            // handle first commit...
+
+            let parent = commit.parent(0)?;
+            let tree = commit.tree()?;
+            let parent_tree = parent.tree()?;
+
+            let entry = tree.get_path(self.get_version_file());
+            let parent_entry = parent_tree.get_path(self.get_version_file());
+
+            let changed = match (entry, parent_entry) {
+                (Ok(e), Ok(pe)) => {
+                    // check the files contents are acually different and it
+                    // not a change in file permission
+                    let oid_e = e.to_object(repo)?.peel_to_blob()?.id();
+                    let oid_pe = pe.to_object(repo)?.peel_to_blob()?.id();
+                    oid_e != oid_pe // changed
+                }
+                (Ok(_), Err(_)) => true,   // removed
+                (Err(_), Ok(_)) => true,   // added
+                (Err(_), Err(_)) => false, //no change
+            };
+
+            if changed {
+                let blob = parent_tree
+                    .get_path(self.get_version_file())?
+                    .to_object(repo)?
+                    .peel_to_blob()?;
+                let raw = std::str::from_utf8(blob.content())?;
+                let changed_version = self.parse_version_file(raw)?;
+                let current_version = self.get_version();
+                if changed_version < current_version {
+                    return anyhow::Ok(Some(oid));
+                }
+            }
+        }
+        Err(git2::Error::from_str("No commit found that changes project's version").into())
+    }
+    fn parse_version_file(&self, unparsed_str: &str) -> anyhow::Result<SemVer>;
 }
 
 pub struct Config {
@@ -113,7 +162,18 @@ pub fn repo_is_clean(repo: &Repository) -> anyhow::Result<bool> {
     Ok(statuses.is_empty())
 }
 
-pub fn get_prev_clog_bump(repo: &Repository, upto_oid: Oid) -> anyhow::Result<Option<Oid>> {
+pub fn get_latest_release(
+    repo: &Repository,
+    upto_oid: Oid,
+    project: &dyn Project,
+) -> anyhow::Result<Option<Oid>> {
+    match project.get_latest_release(repo)? {
+        Some(oid) => Ok(Some(oid)),
+        None => get_prev_clog_bump(repo, upto_oid),
+    }
+}
+
+fn get_prev_clog_bump(repo: &Repository, upto_oid: Oid) -> anyhow::Result<Option<Oid>> {
     let mut revwalk = repo.revwalk()?;
     revwalk.set_sorting(Sort::TOPOLOGICAL)?;
     revwalk.push(upto_oid)?;
@@ -161,7 +221,7 @@ pub fn make_bump_commit(
     let tree_id = {
         let mut index = repo.index()?;
         let rel_path = project.get_version_file();
-        index.add_path(&rel_path)?;
+        index.add_path(rel_path)?;
         index.write()?;
         index.write_tree()?
     };
@@ -208,7 +268,7 @@ pub fn make_initial_commit(
     let tree_id = {
         let mut index = repo.index()?;
         let rel_path = project.get_version_file();
-        index.add_path(&rel_path)?;
+        index.add_path(rel_path)?;
         index.write()?;
         index.write_tree()?
     };

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use anyhow::{anyhow, Context, Error};
 use clap::Parser;
 use clog::{
-    detect_project, get_prev_clog_bump, make_bump_commit, make_initial_commit,
+    detect_project, get_latest_release, make_bump_commit, make_initial_commit,
     parse_commit_message, repo_has_commits, repo_is_clean,
     semver::{SemVer, SemVerBump},
     Config, Project,
@@ -27,6 +27,7 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     let config = Config::new(&cli.path);
+    let project = detect_project(&config)?;
 
     let repo = Repository::open(&cli.path)
         .with_context(|| format!("Failed to open repo at {:?}", cli.path))?;
@@ -44,9 +45,7 @@ fn main() -> anyhow::Result<()> {
         .with_context(|| format!("Failed to resolve commit {}", cli.upto))?;
     let upto_oid = upto_obj.id();
 
-    let since_oid = get_prev_clog_bump(&repo, upto_oid)?;
-
-    let project = detect_project(&config)?;
+    let since_oid = get_latest_release(&repo, upto_oid, project.as_ref())?;
 
     let mut revwalk = repo.revwalk()?;
     revwalk.set_sorting(Sort::TOPOLOGICAL)?;

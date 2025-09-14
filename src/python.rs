@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::{anyhow, Ok};
+use anyhow::anyhow;
 use toml::Table;
 use toml_edit::DocumentMut;
 
@@ -12,16 +12,11 @@ use crate::{Project, SemVer, SemVerBump};
 pub struct PyProject {
     version: SemVer,
     path: PathBuf,
-    root: PathBuf,
 }
 
-impl Project for PyProject {
-    fn from_dir(path: &Path) -> anyhow::Result<Self> {
-        let mut pyproject_path = path.to_path_buf();
-        pyproject_path.push("pyproject.toml");
-        let raw_file: String = fs::read_to_string(&pyproject_path)?;
-
-        let toml = raw_file.parse::<Table>()?;
+impl PyProject {
+    fn parse_pyproject(pyproject_str: &str) -> anyhow::Result<SemVer> {
+        let toml = pyproject_str.parse::<Table>()?;
 
         let project = toml
             .get("project")
@@ -33,12 +28,19 @@ impl Project for PyProject {
             .and_then(|val| val.as_str())
             .ok_or_else(|| anyhow!("missing version in [project] section"))?;
 
-        let version = SemVer::parse(version_str)?;
+        SemVer::parse(version_str)
+    }
+}
 
+impl Project for PyProject {
+    fn from_dir(path: &Path) -> anyhow::Result<Self> {
+        let mut pyproject_path = path.to_path_buf();
+        pyproject_path.push("pyproject.toml");
+        let raw_file: String = fs::read_to_string(&pyproject_path)?;
+        let version = Self::parse_pyproject(&raw_file)?;
         Ok(Self {
             version,
             path: pyproject_path,
-            root: path.to_path_buf(),
         })
     }
 
@@ -59,8 +61,8 @@ impl Project for PyProject {
         Ok(())
     }
 
-    fn get_version_file(&self) -> PathBuf {
-        self.path.strip_prefix(&self.root).unwrap().to_path_buf()
+    fn get_version_file(&self) -> &Path {
+        Path::new("pyproject.toml")
     }
 
     fn set_initial_release(&mut self) -> anyhow::Result<()> {
@@ -69,5 +71,9 @@ impl Project for PyProject {
         }
         self.version = SemVer::version_1_0_0();
         Ok(())
+    }
+
+    fn parse_version_file(&self, unparsed_str: &str) -> anyhow::Result<SemVer> {
+        Self::parse_pyproject(unparsed_str)
     }
 }
