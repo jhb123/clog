@@ -7,7 +7,7 @@ use anyhow::anyhow;
 use toml::Table;
 use toml_edit::DocumentMut;
 
-use crate::{Project, SemVer, SemVerBump};
+use crate::{Config, Project, SemVer, SemVerBump};
 
 pub struct PyProject {
     version: SemVer,
@@ -75,5 +75,8 @@ impl Project for PyProject {
 
     fn parse_version_file(&self, unparsed_str: &str) -> anyhow::Result<SemVer> {
         Self::parse_pyproject(unparsed_str)
+    }
+    fn get_extra_files(&self, config: &Config) ->anyhow::Result<Vec<PathBuf>> {
+        Ok(vec![])
     }
 }

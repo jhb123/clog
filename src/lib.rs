@@ -76,6 +76,7 @@ pub trait Project {
         Err(git2::Error::from_str("No commit found that changes project's version").into())
     }
     fn parse_version_file(&self, unparsed_str: &str) -> anyhow::Result<SemVer>;
+    fn get_extra_files(&self, config: &Config) -> anyhow::Result<Vec<PathBuf>>;
 }
 
 pub struct Config {
@@ -93,6 +94,7 @@ impl Config {
             ..Default::default()
         }
     }
+
 }
 
 impl Default for Config {
@@ -222,6 +224,9 @@ pub fn make_bump_commit(
         let mut index = repo.index()?;
         let rel_path = project.get_version_file();
         index.add_path(rel_path)?;
+        for file in project.get_extra_files(config)? {
+            index.add_path(&file)?
+        }
         index.write()?;
         index.write_tree()?
     };

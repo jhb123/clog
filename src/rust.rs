@@ -1,13 +1,12 @@
 use std::{
-    fs,
-    path::{Path, PathBuf},
+    fs, path::{Path, PathBuf}, process::Command, str::FromStr
 };
 
-use anyhow::{anyhow, Ok};
+use anyhow::{anyhow, Error, Ok};
 use toml::Table;
 use toml_edit::DocumentMut;
 
-use crate::{Project, SemVer, SemVerBump};
+use crate::{Config, Project, SemVer, SemVerBump};
 
 pub struct CargoProject {
     version: SemVer,
@@ -75,5 +74,16 @@ impl Project for CargoProject {
 
     fn parse_version_file(&self, unparsed_str: &str) -> anyhow::Result<SemVer> {
         Self::parse_cargo(unparsed_str)
+    }
+
+    fn get_extra_files(&self, config: &Config) ->anyhow::Result<Vec<PathBuf>> {
+        let status = Command::new("cargo")
+            .arg("generate-lockfile")
+            .status()
+            .expect("failed to run cargo generate-lockfile");
+        if !status.success() {
+            return Err(anyhow::anyhow!("Failed to generate lockfile"))
+        }
+        Ok(vec![PathBuf::from_str("Cargo.lock")?])
     }
 }
