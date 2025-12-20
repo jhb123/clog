@@ -15,8 +15,13 @@ struct Cli {
     /// Sets parent directory of test repo
     #[clap(short, long, value_name = "FILE", default_value = "./")]
     path: PathBuf,
+    
     #[clap(short, long, value_name = "initial-release", default_value = "false")]
     initial: bool,
+    
+    /// Skip confirmation prompts (automatically answer yes)
+    #[arg(short = 'y', long)]
+    yes: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -37,9 +42,9 @@ fn main() -> anyhow::Result<()> {
     }
 
     if cli.initial {
-        major_version_one(project, &repo, &config)
+        major_version_one(project, &repo, &config, cli.yes)
     } else {
-        bump_release(project, &repo, &config)
+        bump_release(project, &repo, &config, cli.yes)
     }
 }
 
@@ -47,21 +52,32 @@ fn bump_release(
     mut project: Box<dyn Project>,
     repo: &Repository,
     config: &Config,
+    auto_yes: bool,
 ) -> anyhow::Result<()> {
     let current_version = project.get_version().clone();
     let new_version = get_next_version(repo, &project, config).unwrap();
+    
     if new_version > current_version {
-        let ans = Confirm::new(&format!(
-            "would you like to bump this project's version from {} {}",
-            current_version, new_version
-        ))
-        .with_help_message(
-            "This action will modify your project's configuration file and create a release commit",
-        )
-        .with_default(false)
-        .prompt()?;
-        if ans {
-            make_bump_commit(repo, &mut project, config).unwrap();
+        let should_bump = if auto_yes {
+            println!(
+                "Bumping version from {} to {}",
+                current_version, new_version
+            );
+            true
+        } else {
+            Confirm::new(&format!(
+                "would you like to bump this project's version from {} to {}?",
+                current_version, new_version
+            ))
+            .with_help_message(
+                "This action will modify your project's configuration file and create a release commit",
+            )
+            .with_default(false)
+            .prompt()?
+        };
+        
+        if should_bump {
+            make_bump_commit(repo, &mut project, config)?;
         }
     } else {
         println!("No release required")
@@ -74,6 +90,7 @@ fn major_version_one(
     mut project: Box<dyn Project>,
     repo: &Repository,
     config: &Config,
+    auto_yes: bool,
 ) -> anyhow::Result<()> {
     if SemVer::version_1_0_0() <= project.get_version() {
         return Err(Error::msg(format!(
@@ -81,21 +98,29 @@ fn major_version_one(
             SemVer::version_1_0_0()
         )));
     }
+    
     println!(
         "New version: {} -> {}",
         project.get_version().clone(),
         SemVer::version_1_0_0(),
     );
 
-    let ans = Confirm::new("Would you like to make the first release this project?")
-        .with_help_message("By releasing version 1.0.0, you are declaring that this API is stable. This action will modify your project's configuration file and create a release commit")
-        .with_default(false)
-        .prompt()?;
-    if ans {
+    let should_release = if auto_yes {
+        println!("Creating initial release v1.0.0");
+        true
+    } else {
+        Confirm::new("Would you like to make the first release of this project?")
+            .with_help_message(
+                "By releasing version 1.0.0, you are declaring that this API is stable. \
+                This action will modify your project's configuration file and create a release commit"
+            )
+            .with_default(false)
+            .prompt()?
+    };
+    
+    if should_release {
         make_initial_commit(repo, &mut project, config)?;
     }
 
     Ok(())
 }
-
-//
