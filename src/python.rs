@@ -44,6 +44,10 @@ impl Project for PyProject {
         })
     }
 
+    fn get_dir(&self) -> &Path {
+        self.path.parent().expect("Project must be in a directory")
+    }
+
     fn get_version(&self) -> SemVer {
         self.version.clone()
     }
@@ -76,7 +80,7 @@ impl Project for PyProject {
     fn parse_version_file(&self, unparsed_str: &str) -> anyhow::Result<SemVer> {
         Self::parse_pyproject(unparsed_str)
     }
-    fn get_extra_files(&self, config: &Config) ->anyhow::Result<Vec<PathBuf>> {
+    fn get_extra_files(&self, _config: &Config) -> anyhow::Result<Vec<PathBuf>> {
         Ok(vec![])
     }
 }
