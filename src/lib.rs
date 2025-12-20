@@ -12,6 +12,9 @@ use std::{
 use git2::{Commit, Oid, Repository, Signature, Sort, StatusOptions};
 use regex::Regex;
 
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support;
+
 use crate::{
     python::PyProject,
     rust::CargoProject,
@@ -102,9 +105,9 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn new(path: &Path) -> Self {
+    pub fn new<P: AsRef<std::path::Path>>(path: &P) -> Self {
         Self {
-            path: path.to_path_buf(),
+            path: path.as_ref().to_path_buf(),
             patterns: Patterns::default(),
             ..Default::default()
         }
