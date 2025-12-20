@@ -3,12 +3,10 @@ use std::path::PathBuf;
 use anyhow::{anyhow, Context, Error};
 use clap::Parser;
 use clog::{
-    detect_project, get_latest_release, make_bump_commit, make_initial_commit,
-    parse_commit_message, repo_has_commits, repo_is_clean,
-    semver::{SemVer, SemVerBump},
-    Config, Project,
+    detect_project, get_next_version, make_bump_commit, make_initial_commit, repo_has_commits,
+    repo_is_clean, semver::SemVer, Config, Project,
 };
-use git2::{Repository, Sort};
+use git2::Repository;
 use inquire::Confirm;
 
 #[derive(Parser)]
@@ -17,8 +15,6 @@ struct Cli {
     /// Sets parent directory of test repo
     #[clap(short, long, value_name = "FILE", default_value = "./")]
     path: PathBuf,
-    #[clap(short, long, value_name = "up-to", default_value = "HEAD")]
-    upto: String,
     #[clap(short, long, value_name = "initial-release", default_value = "false")]
     initial: bool,
 }
@@ -40,44 +36,20 @@ fn main() -> anyhow::Result<()> {
         return Err(anyhow!("Repo is not in a clean state. Commit your changes"));
     }
 
-    let upto_obj = repo
-        .revparse_single(&cli.upto)
-        .with_context(|| format!("Failed to resolve commit {}", cli.upto))?;
-    let upto_oid = upto_obj.id();
-
-    let since_oid = get_latest_release(&repo, upto_oid, project.as_ref())?;
-
-    let mut revwalk = repo.revwalk()?;
-    revwalk.set_sorting(Sort::TOPOLOGICAL)?;
-    revwalk.push(upto_oid)?;
-
-    if let Some(since) = since_oid {
-        revwalk.hide(since)?;
-    }
-
-    let mut bump = SemVerBump::None;
-    for oid_result in revwalk {
-        let oid = oid_result?;
-        let commit = repo.find_commit(oid)?;
-        let bump_kind = parse_commit_message(&commit, &config);
-        bump = std::cmp::max(bump, bump_kind);
-    }
-
     if cli.initial {
-        initial_release(project, &repo, &config)
+        major_version_one(project, &repo, &config)
     } else {
-        bump_release(bump, project, &repo, &config)
+        bump_release(project, &repo, &config)
     }
 }
 
 fn bump_release(
-    bump: SemVerBump,
     mut project: Box<dyn Project>,
     repo: &Repository,
     config: &Config,
 ) -> anyhow::Result<()> {
     let current_version = project.get_version().clone();
-    let new_version = project.get_version().bump(bump);
+    let new_version = get_next_version(repo, &project, config).unwrap();
     if new_version > current_version {
         let ans = Confirm::new(&format!(
             "would you like to bump this project's version from {} {}",
@@ -89,7 +61,7 @@ fn bump_release(
         .with_default(false)
         .prompt()?;
         if ans {
-            make_bump_commit(repo, &mut project, bump, config)?;
+            make_bump_commit(repo, &mut project, config).unwrap();
         }
     } else {
         println!("No release required")
@@ -98,7 +70,7 @@ fn bump_release(
     Ok(())
 }
 
-fn initial_release(
+fn major_version_one(
     mut project: Box<dyn Project>,
     repo: &Repository,
     config: &Config,

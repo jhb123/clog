@@ -7,6 +7,7 @@ use names::{Generator, Name};
 use std::{
     fs,
     path::{Path, PathBuf},
+    process::exit,
 };
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Default, Debug)]
@@ -49,13 +50,10 @@ fn simple_repo(path: &Path) -> anyhow::Result<()> {
     path.push("simple");
     let repo = init_repo(&path)?;
 
-    check_repo_has_commits(&repo)?;
-    if repo_has_commits(&repo) {
-        empty_commit(&repo, "test: fix tests")?;
-    } else {
-        empty_commit(&repo, "feat: initial commit")?;
-    }
-    empty_commit(&repo, "fix: correct logic in parser")?;
+    empty_commit(
+        &repo,
+        "fix: correct logic in parser\nextra detail\nfooter notes",
+    )?;
     empty_commit(&repo, "docs: add README")?;
     empty_commit(&repo, "feat!: breaking change")?;
     empty_commit(&repo, "chore: cleanup build script")?;
@@ -67,13 +65,6 @@ fn branches_repo(path: &Path) -> anyhow::Result<()> {
     let mut path = path.to_path_buf();
     path.push("branches");
     let repo = init_repo(&path)?;
-    check_repo_has_commits(&repo)?;
-    if repo_has_commits(&repo) {
-        empty_commit(&repo, "test: fix tests")?;
-    } else {
-        empty_commit(&repo, "feat: initial commit")?;
-    }
-
     let mut generator = Generator::with_naming(Name::Numbered);
     let branch_name = generator.next().unwrap();
 
@@ -142,17 +133,19 @@ fn init_repo(path: &PathBuf) -> anyhow::Result<Repository> {
             fs::remove_dir_all(path)?;
             fs::create_dir_all(path)?;
         } else {
-            println!("Nothing happened");
+            println!("Appending new commits to repo");
         }
     }
 
     let repo = Repository::open(path)
         .or_else(|_| {
-            println!("Initializing new repo in {}", path.display());
+            println!("Opening repo in {}", path.display());
             Repository::init(path)
         })
         .map_err(|_| anyhow::anyhow!("Failed to open repo"))?;
-
+    if !repo_has_commits(&repo) {
+        pyproject_init_commit(&repo)?;
+    }
     Ok(repo)
 }
 
@@ -240,5 +233,45 @@ fn merge_commits(
     // back from the initial commit to work out what the
     let tree = parents[0].tree()?;
     repo.commit(Some("HEAD"), &sig, &sig, message, &tree, parents)?;
+    Ok(())
+}
+
+fn make_pyproject(path: &Path) {
+    let data = include_str!("pyproject.toml.example");
+    fs::write(path, format!("{data}")).unwrap();
+}
+
+/// Create a commit with a message on the current branch
+fn pyproject_init_commit(repo: &Repository) -> anyhow::Result<()> {
+    let sig = Signature::now("Test User", "test@example.com")?;
+
+    let mut pyproject_path = repo
+        .path()
+        .parent()
+        .expect("git repo has no parent")
+        .to_path_buf();
+    pyproject_path.push("pyproject.toml");
+    make_pyproject(&pyproject_path);
+
+    let tree_id = {
+        let mut index = repo.index()?;
+        index.add_path(Path::new("pyproject.toml"))?;
+        index.write()?;
+        index.write_tree()?
+    };
+
+    let tree = repo.find_tree(tree_id)?;
+
+    let parent_commit = repo
+        .head()
+        .ok()
+        .and_then(|h| h.target())
+        .and_then(|oid| repo.find_commit(oid).ok());
+
+    if parent_commit.is_some() {
+        eprintln!("Cannot initialise a repo that has already been created");
+        exit(1)
+    }
+    repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])?;
     Ok(())
 }

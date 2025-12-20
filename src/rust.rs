@@ -1,8 +1,11 @@
 use std::{
-    fs, path::{Path, PathBuf}, process::Command, str::FromStr
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+    str::FromStr,
 };
 
-use anyhow::{anyhow, Error, Ok};
+use anyhow::{anyhow, Ok};
 use toml::Table;
 use toml_edit::DocumentMut;
 
@@ -12,6 +15,7 @@ pub struct CargoProject {
     version: SemVer,
     path: PathBuf,
 }
+
 impl CargoProject {
     fn parse_cargo(cargo_str: &str) -> anyhow::Result<SemVer> {
         let toml = cargo_str.parse::<Table>()?;
@@ -42,6 +46,10 @@ impl Project for CargoProject {
             version,
             path: cargo_path,
         })
+    }
+
+    fn get_dir(&self) -> &Path {
+        self.path.parent().expect("Project must be in a directory")
     }
 
     fn get_version(&self) -> SemVer {
@@ -76,13 +84,13 @@ impl Project for CargoProject {
         Self::parse_cargo(unparsed_str)
     }
 
-    fn get_extra_files(&self, config: &Config) ->anyhow::Result<Vec<PathBuf>> {
+    fn get_extra_files(&self, _config: &Config) -> anyhow::Result<Vec<PathBuf>> {
         let status = Command::new("cargo")
             .arg("generate-lockfile")
             .status()
             .expect("failed to run cargo generate-lockfile");
         if !status.success() {
-            return Err(anyhow::anyhow!("Failed to generate lockfile"))
+            return Err(anyhow::anyhow!("Failed to generate lockfile"));
         }
         Ok(vec![PathBuf::from_str("Cargo.lock")?])
     }
