@@ -3,7 +3,12 @@ use std::{cmp::Ordering, fmt::Display};
 use anyhow::anyhow;
 use itertools::EitherOrBoth::{Both, Left, Right};
 use itertools::Itertools;
+use once_cell::sync::Lazy;
 use regex::Regex;
+
+static SEMVER_STR: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"^(?P<major>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\.(?P<patch>0|[1-9]\d*)(?:-(?P<prerelease>(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+(?P<buildmetadata>[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$").unwrap()
+});
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord)]
 pub enum SemVerBump {
@@ -39,6 +44,16 @@ impl SemVer {
         }
     }
 
+    pub fn version_0_1_0() -> Self {
+        Self {
+            major: 0,
+            minor: 1,
+            patch: 0,
+            prerelease: None,
+            build_meta: None,
+        }
+    }
+
     pub fn version_1_0_0() -> Self {
         Self {
             major: 1,
@@ -52,8 +67,8 @@ impl SemVer {
     pub fn parse(string: &str) -> anyhow::Result<Self> {
         // Recommended Regex from Semver 2.0.0
         // no leading zeros: 0|[1-9]\d*
-        let r = Regex::new(r"^(?P<major>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\.(?P<patch>0|[1-9]\d*)(?:-(?P<prerelease>(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+(?P<buildmetadata>[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$").unwrap();
-        let caps = r
+
+        let caps = SEMVER_STR
             .captures(string)
             .ok_or_else(|| anyhow!("Project does not follow SemVer"))?;
 

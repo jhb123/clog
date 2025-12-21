@@ -10,6 +10,7 @@ use std::{
 };
 
 use git2::{Commit, Oid, Repository, Signature, Sort, StatusOptions};
+use once_cell::sync::Lazy;
 use regex::Regex;
 
 #[cfg(any(test, feature = "test-support"))]
@@ -22,6 +23,12 @@ use crate::{
 };
 
 static CLOG_TRAILER: &str = "Bumped-by: clog";
+
+static DEFAULT_PATTERNS: Lazy<Patterns> = Lazy::new(|| Patterns {
+    major: vec![Regex::new(r"^.*!:").unwrap()],
+    minor: vec![Regex::new(r"^feat:").unwrap()],
+    patch: vec![Regex::new(r"^fix:").unwrap()],
+});
 
 pub trait Project {
     fn get_version(&self) -> SemVer;
@@ -126,6 +133,7 @@ impl Default for Config {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct Patterns {
     major: Vec<Regex>,
     minor: Vec<Regex>,
@@ -134,11 +142,7 @@ pub struct Patterns {
 
 impl Default for Patterns {
     fn default() -> Self {
-        Self {
-            major: vec![Regex::new(r"^.*!:").unwrap()],
-            minor: vec![Regex::new(r"^feat:").unwrap()],
-            patch: vec![Regex::new(r"^fix:").unwrap()],
-        }
+        DEFAULT_PATTERNS.clone()
     }
 }
 
@@ -262,10 +266,13 @@ pub fn make_bump_commit(
     repo: &Repository,
     project: &mut dyn Project,
     config: &Config,
-) -> anyhow::Result<Oid> {
+) -> anyhow::Result<()> {
     prepare_changelog(repo, project, config).unwrap();
 
     let bump = calculate_bump(repo, project, config).unwrap();
+    if bump == SemVerBump::None {
+        return Ok(());
+    }
     let message = format!(
         "chore: bump version {} -> {}\n\n{}",
         project.get_version(),
@@ -302,13 +309,13 @@ pub fn make_bump_commit(
         .and_then(|h| h.target())
         .and_then(|oid| repo.find_commit(oid).ok());
 
-    let commit_id = if let Some(parent) = parent_commit {
-        repo.commit(Some("HEAD"), &sig, &sig, &message, &tree, &[&parent])?
+    if let Some(parent) = parent_commit {
+        repo.commit(Some("HEAD"), &sig, &sig, &message, &tree, &[&parent])?;
     } else {
-        repo.commit(Some("HEAD"), &sig, &sig, &message, &tree, &[])?
+        repo.commit(Some("HEAD"), &sig, &sig, &message, &tree, &[])?;
     };
 
-    Ok(commit_id)
+    Ok(())
 }
 
 /// Create the initial release commit on the current branch
@@ -381,8 +388,7 @@ fn append_changelog(
 ) -> anyhow::Result<()> {
     let mut path = repo.commondir().parent().unwrap().to_path_buf();
     path.push(project.get_changelog());
-    let mut new_changelog_entry =
-        format!("# Version {}", get_next_version(repo, project, config)?);
+    let mut new_changelog_entry = format!("# Version {}", get_next_version(repo, project, config)?);
     let since_oid = get_latest_release(repo, project)?;
     let upto_oid = get_head(repo).unwrap();
     let mut revwalk = repo.revwalk()?;
@@ -518,4 +524,86 @@ fn find_first_version_of_project(
         }
     }
     Ok(version)
+}
+
+#[cfg(test)]
+mod test {
+    use assert_fs::TempDir;
+    use git2::Repository;
+    use rstest::{fixture, rstest};
+
+    use crate::test_support::*;
+    use crate::*;
+
+    #[fixture]
+    fn pre_stable_repo_dir() -> TempDir {
+        let tmp_dir = TempDir::new().unwrap();
+        init_python_repo_0_1_0(&tmp_dir).unwrap();
+        tmp_dir
+    }
+
+    #[fixture]
+    fn stable_repo_dir() -> TempDir {
+        let tmp_dir = TempDir::new().unwrap();
+        init_python_repo_1_0_0(&tmp_dir).unwrap();
+        tmp_dir
+    }
+
+    #[fixture]
+    fn pre_stable_simple_repo_dir() -> TempDir {
+        let tmp_dir = TempDir::new().unwrap();
+        simple_repo(&tmp_dir, init_python_repo_0_1_0).unwrap();
+        tmp_dir
+    }
+
+    #[fixture]
+    fn pre_stable_branches_repo_dir() -> TempDir {
+        let tmp_dir = TempDir::new().unwrap();
+        branches_repo(&tmp_dir, init_python_repo_0_1_0).unwrap();
+        tmp_dir
+    }
+
+    #[fixture]
+    fn stable_simple_repo_dir() -> TempDir {
+        let tmp_dir = TempDir::new().unwrap();
+        simple_repo(&tmp_dir, init_python_repo_1_0_0).unwrap();
+        tmp_dir
+    }
+
+    #[fixture]
+    fn stable_branches_repo_dir() -> TempDir {
+        let tmp_dir = TempDir::new().unwrap();
+        branches_repo(&tmp_dir, init_python_repo_1_0_0).unwrap();
+        tmp_dir
+    }
+
+    #[rstest]
+    fn test_make_bump_commit(
+        pre_stable_repo_dir: TempDir,
+        #[values(PATCH, MINOR, MAJOR, NONE)] msg1: CommitCase,
+        #[values(PATCH, MINOR, MAJOR, NONE)] msg2: CommitCase,
+        #[values(PATCH, MINOR, MAJOR, NONE)] msg3: CommitCase,
+        #[values(PATCH, MINOR, MAJOR, NONE)] msg4: CommitCase,
+    ) {
+        let config = Config::new(&pre_stable_repo_dir);
+        let mut project = detect_project(&config).unwrap();
+        let repo = Repository::open(&pre_stable_repo_dir).unwrap();
+        empty_commit(&repo, msg1.msg).unwrap();
+        empty_commit(&repo, msg2.msg).unwrap();
+        empty_commit(&repo, msg3.msg).unwrap();
+        empty_commit(&repo, msg4.msg).unwrap();
+
+        let v1 = get_python_pyroject_version(&pre_stable_repo_dir).unwrap();
+        assert_eq!(v1, SemVer::version_0_1_0());
+        make_bump_commit(&repo, project.as_mut(), &config).unwrap();
+        let v2 = get_python_pyroject_version(&pre_stable_repo_dir).unwrap();
+        let expected_bump = [msg1.bump, msg2.bump, msg3.bump, msg4.bump]
+            .into_iter()
+            .max()
+            .unwrap();
+        assert_eq!(v2, v1.bump(expected_bump));
+        if expected_bump != SemVerBump::None {
+            assert_clog_commit_version(&pre_stable_repo_dir, v1.bump(expected_bump))
+        }
+    }
 }

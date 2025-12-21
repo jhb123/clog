@@ -3,8 +3,8 @@ use std::path::Path;
 use anyhow::{anyhow, Context, Error};
 use clap::Parser;
 use clog::{
-    detect_project, get_next_version, make_bump_commit, make_initial_stable_commit, repo_has_commits,
-    repo_is_clean, semver::SemVer, Config,
+    detect_project, get_next_version, make_bump_commit, make_initial_stable_commit,
+    repo_has_commits, repo_is_clean, semver::SemVer, Config,
 };
 use git2::Repository;
 use inquire::Confirm;
@@ -43,12 +43,8 @@ fn main() -> anyhow::Result<()> {
     }
 }
 
-fn bump_release(
-    repo: &Repository,
-    config: &Config,
-    auto_yes: bool,
-) -> anyhow::Result<()> {
-    let mut project = detect_project(&config)?;
+fn bump_release(repo: &Repository, config: &Config, auto_yes: bool) -> anyhow::Result<()> {
+    let mut project = detect_project(config)?;
     let current_version = project.get_version().clone();
     let new_version = get_next_version(repo, project.as_ref(), config).unwrap();
 
@@ -81,12 +77,8 @@ fn bump_release(
     Ok(())
 }
 
-fn major_version_one(
-    repo: &Repository,
-    config: &Config,
-    auto_yes: bool,
-) -> anyhow::Result<()> {
-    let mut project = detect_project(&config)?;
+fn major_version_one(repo: &Repository, config: &Config, auto_yes: bool) -> anyhow::Result<()> {
+    let mut project = detect_project(config)?;
 
     if SemVer::version_1_0_0() <= project.get_version() {
         return Err(Error::msg(format!(
