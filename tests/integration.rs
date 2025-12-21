@@ -1,8 +1,6 @@
-use std::fs;
-
 use assert_cmd::{cargo::cargo_bin_cmd, pkg_name};
 use assert_fs::fixture::TempDir;
-use clog::{Config, detect_project, semver::SemVer, test_support::{init_python_repo, simple_repo}};
+use clog::{semver::SemVer, test_support::{get_python_pyroject_version, init_python_repo, simple_repo}};
 use rstest::{fixture, rstest};
 
 #[fixture]
@@ -25,18 +23,14 @@ fn test_help() {
 
 #[rstest]
 fn test_bump_commit_version_file(simple_repo_dir: TempDir) {
-    let config = Config::new(&simple_repo_dir);
-    let project = detect_project(&config).unwrap();
-    let v1 = project.get_version();
+    let v1 = get_python_pyroject_version(&simple_repo_dir).unwrap();
     assert_eq!(v1, SemVer::parse("0.1.0").unwrap());
     cargo_bin_cmd!(pkg_name!())
         .arg("--yes")
-        .current_dir(project.get_dir())
+        .current_dir(&simple_repo_dir)
         .assert()
         .success()
         .stderr("");
-    let mut pyproject = project.get_dir().to_path_buf();
-    pyproject.push(project.get_version_file());
-    let v2 = project.parse_version_file(&fs::read_to_string(pyproject).unwrap()).unwrap();
+    let v2 = get_python_pyroject_version(&simple_repo_dir).unwrap();
     assert_eq!(v2, SemVer::parse("0.2.0").unwrap());
 }
