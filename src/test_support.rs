@@ -9,7 +9,7 @@ use std::{
     process::exit,
 };
 
-use crate::repo_has_commits;
+use crate::{Project, python::PyProject, repo_has_commits, semver::SemVer};
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Default, Debug)]
 pub enum RepoStyle {
@@ -104,6 +104,13 @@ pub fn init_python_repo<P: AsRef<std::path::Path>>(path: &P) -> anyhow::Result<R
         pyproject_init_commit(&repo)?;
     }
     Ok(repo)
+}
+
+/// Given a directory containing a python project, parse the
+/// version from the pyproject.toml
+pub fn get_python_pyroject_version<P: AsRef<std::path::Path>>(dir: &P) -> anyhow::Result<SemVer>{
+    let p = PyProject::from_dir(dir.as_ref())?;
+    Ok(p.get_version())
 }
 
 /// Create an empty commit with a message on the current branch
