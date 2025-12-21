@@ -203,6 +203,7 @@ dependencies = [
  "inquire",
  "itertools",
  "names",
+ "once_cell",
  "regex",
  "rstest",
  "tempfile",
