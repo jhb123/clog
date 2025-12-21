@@ -12,11 +12,10 @@ use inquire::Confirm;
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Cli {
-    
     /// Declare stable and bump to v1.0.0
     #[clap(short, long, default_value = "false")]
     stable: bool,
-    
+
     /// Skip confirmation prompts (automatically answer yes)
     #[arg(short = 'y', long)]
     yes: bool,
@@ -26,7 +25,7 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let current_dir = Path::new("./");
     let config = Config::new(&current_dir);
-    let project = detect_project(&config)?;
+    let mut project = detect_project(&config)?;
 
     let repo = Repository::open(current_dir)
         .with_context(|| format!("Failed to open repo at {:?}", current_dir.canonicalize()))?;
@@ -40,21 +39,21 @@ fn main() -> anyhow::Result<()> {
     }
 
     if cli.stable {
-        major_version_one(project, &repo, &config, cli.yes)
+        major_version_one(project.as_mut(), &repo, &config, cli.yes)
     } else {
-        bump_release(project, &repo, &config, cli.yes)
+        bump_release(project.as_mut(), &repo, &config, cli.yes)
     }
 }
 
 fn bump_release(
-    mut project: Box<dyn Project>,
+    project: &mut dyn Project,
     repo: &Repository,
     config: &Config,
     auto_yes: bool,
 ) -> anyhow::Result<()> {
     let current_version = project.get_version().clone();
-    let new_version = get_next_version(repo, &project, config).unwrap();
-    
+    let new_version = get_next_version(repo, project, config).unwrap();
+
     if new_version > current_version {
         let should_bump = if auto_yes {
             println!(
@@ -73,9 +72,9 @@ fn bump_release(
             .with_default(false)
             .prompt()?
         };
-        
+
         if should_bump {
-            make_bump_commit(repo, &mut project, config)?;
+            make_bump_commit(repo, project, config)?;
         }
     } else {
         println!("No release required")
@@ -85,7 +84,7 @@ fn bump_release(
 }
 
 fn major_version_one(
-    mut project: Box<dyn Project>,
+    project: &mut dyn Project,
     repo: &Repository,
     config: &Config,
     auto_yes: bool,
@@ -96,7 +95,7 @@ fn major_version_one(
             SemVer::version_1_0_0()
         )));
     }
-    
+
     println!(
         "New version: {} -> {}",
         project.get_version().clone(),
@@ -115,9 +114,9 @@ fn major_version_one(
             .with_default(false)
             .prompt()?
     };
-    
+
     if should_release {
-        make_initial_commit(repo, &mut project, config)?;
+        make_initial_commit(repo, project, config)?;
     }
 
     Ok(())

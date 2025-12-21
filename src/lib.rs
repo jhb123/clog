@@ -175,7 +175,7 @@ fn get_changelog_message(commit: &Commit, config: &Config) -> Option<String> {
     let message = commit.message()?.split("\n").next()?;
 
     if patterns.any(|r| r.is_match(message)) {
-        Some(format!("{message}"))
+        Some(message.to_string())
     } else {
         None
     }
@@ -208,10 +208,10 @@ fn get_latest_release(repo: &Repository, project: &dyn Project) -> anyhow::Resul
 
 fn calculate_bump(
     repo: &Repository,
-    project: &Box<dyn Project>,
+    project: &dyn Project,
     config: &Config,
 ) -> anyhow::Result<SemVerBump> {
-    let since_oid = get_latest_release(&repo, project.as_ref())?;
+    let since_oid = get_latest_release(repo, project)?;
     let upto_oid = get_head(repo).unwrap();
     let mut revwalk = repo.revwalk()?;
     revwalk.set_sorting(Sort::TOPOLOGICAL)?;
@@ -225,7 +225,7 @@ fn calculate_bump(
     for oid_result in revwalk {
         let oid = oid_result?;
         let commit = repo.find_commit(oid)?;
-        let bump_kind = parse_commit_message(&commit, &config);
+        let bump_kind = parse_commit_message(&commit, config);
         bump = std::cmp::max(bump, bump_kind);
     }
     println!("{:?}", bump);
@@ -260,12 +260,12 @@ pub fn detect_project(config: &Config) -> anyhow::Result<Box<dyn Project>> {
 /// Create a bump commit on the current branch
 pub fn make_bump_commit(
     repo: &Repository,
-    project: &mut Box<dyn Project>,
+    project: &mut dyn Project,
     config: &Config,
 ) -> anyhow::Result<Oid> {
     prepare_changelog(repo, project, config).unwrap();
 
-    let bump = calculate_bump(repo, &project, config).unwrap();
+    let bump = calculate_bump(repo, project, config).unwrap();
     let message = format!(
         "chore: bump version {} -> {}\n\n{}",
         project.get_version(),
@@ -314,7 +314,7 @@ pub fn make_bump_commit(
 /// Create the initial release commit on the current branch
 pub fn make_initial_commit(
     repo: &Repository,
-    project: &mut Box<dyn Project>,
+    project: &mut dyn Project,
     config: &Config,
 ) -> anyhow::Result<Oid> {
     let message = format!(
@@ -360,7 +360,7 @@ pub fn make_initial_commit(
 
 fn prepare_changelog(
     repo: &Repository,
-    project: &mut Box<dyn Project>,
+    project: &mut dyn Project,
     config: &Config,
 ) -> anyhow::Result<()> {
     let mut path = repo.commondir().parent().unwrap().to_path_buf();
@@ -376,14 +376,13 @@ fn prepare_changelog(
 
 fn append_changelog(
     repo: &Repository,
-    project: &mut Box<dyn Project>,
+    project: &mut dyn Project,
     config: &Config,
 ) -> anyhow::Result<()> {
     let mut path = repo.commondir().parent().unwrap().to_path_buf();
     path.push(project.get_changelog());
-    let mut new_changelog_entry =
-        format!("# Version {}", get_next_version(repo, &project, config)?);
-    let since_oid = get_latest_release(&repo, project.as_ref())?;
+    let mut new_changelog_entry = format!("# Version {}", get_next_version(repo, project, config)?);
+    let since_oid = get_latest_release(repo, project)?;
     let upto_oid = get_head(repo).unwrap();
     let mut revwalk = repo.revwalk()?;
     revwalk.set_sorting(Sort::TOPOLOGICAL)?;
@@ -410,11 +409,11 @@ fn append_changelog(
 
 fn generate_entire_changelog(
     repo: &Repository,
-    project: &mut Box<dyn Project>,
+    project: &mut dyn Project,
     config: &Config,
 ) -> anyhow::Result<()> {
     println!("generating new changelog.md");
-    let mut changelog = format!("# Version {}", get_next_version(repo, &project, config)?);
+    let mut changelog = format!("# Version {}", get_next_version(repo, project, config)?);
     let upto_oid = get_head(repo).unwrap();
     let mut revwalk = repo.revwalk()?;
     revwalk.set_sorting(Sort::TOPOLOGICAL)?;
@@ -423,7 +422,7 @@ fn generate_entire_changelog(
     for oid_result in revwalk {
         let oid = oid_result?;
         let commit = repo.find_commit(oid)?;
-        if let Some(v) = is_version_bump(&commit, repo, &project)? {
+        if let Some(v) = is_version_bump(&commit, repo, project)? {
             changelog.push('\n');
             changelog.push_str(&format!("# Version {}", v));
         }
@@ -434,7 +433,7 @@ fn generate_entire_changelog(
         }
     }
 
-    if let Some(version) = find_first_version_of_project(repo, project, config)? {
+    if let Some(version) = find_first_version_of_project(repo, project)? {
         changelog.push_str(&format!("\n# Version {}\nInitial release\n", version));
     }
 
@@ -459,17 +458,17 @@ fn get_head(repo: &Repository) -> Option<Oid> {
 
 pub fn get_next_version(
     repo: &Repository,
-    project: &Box<dyn Project>,
+    project: &dyn Project,
     config: &Config,
 ) -> anyhow::Result<SemVer> {
-    let bump = calculate_bump(&repo, &project, &config)?;
+    let bump = calculate_bump(repo, project, config)?;
     Ok(project.get_version().bump(bump))
 }
 
 fn is_version_bump(
     commit: &Commit,
     repo: &Repository,
-    project: &Box<dyn Project>,
+    project: &dyn Project,
 ) -> anyhow::Result<Option<SemVer>> {
     println!("Checking if {} is version bump", commit.id());
     if commit.parent_count() == 0 {
@@ -491,7 +490,7 @@ fn is_version_bump(
 fn version_at_commit(
     commit: &Commit,
     repo: &Repository,
-    project: &Box<dyn Project>,
+    project: &dyn Project,
 ) -> anyhow::Result<SemVer> {
     let tree = commit.tree()?;
     let tree_entry = tree.get_path(project.get_version_file())?;
@@ -502,8 +501,7 @@ fn version_at_commit(
 
 fn find_first_version_of_project(
     repo: &Repository,
-    project: &mut Box<dyn Project>,
-    config: &Config,
+    project: &mut dyn Project,
 ) -> anyhow::Result<Option<SemVer>> {
     let upto_oid = get_head(repo).unwrap();
     let mut revwalk = repo.revwalk()?;
@@ -514,7 +512,7 @@ fn find_first_version_of_project(
     for oid_result in revwalk {
         let oid = oid_result?;
         let commit = repo.find_commit(oid)?;
-        if let Ok(v) = version_at_commit(&commit, repo, &project) {
+        if let Ok(v) = version_at_commit(&commit, repo, project) {
             version = Some(v);
         }
     }
