@@ -1,14 +1,19 @@
 use assert_cmd::{cargo::cargo_bin_cmd, pkg_name};
 use assert_fs::fixture::TempDir;
-use clog::{semver::{SemVer, SemVerBump}, test_support::{branches_repo, empty_commit, get_python_pyroject_version, init_python_repo, simple_repo}};
+use clog::{
+    semver::{SemVer, SemVerBump},
+    test_support::{
+        branches_repo, empty_commit, get_python_pyroject_version, init_python_repo, simple_repo,
+    },
+};
 use git2::Repository;
 use rstest::*;
 
-fn init_python_repo_0_1_0<P: AsRef<std::path::Path>>(path: &P) -> anyhow::Result<Repository>{
+fn init_python_repo_0_1_0<P: AsRef<std::path::Path>>(path: &P) -> anyhow::Result<Repository> {
     init_python_repo(&path, Some(SemVer::parse("0.1.0").unwrap()))
 }
 
-fn init_python_repo_1_0_0<P: AsRef<std::path::Path>>(path: &P) -> anyhow::Result<Repository>{
+fn init_python_repo_1_0_0<P: AsRef<std::path::Path>>(path: &P) -> anyhow::Result<Repository> {
     init_python_repo(&path, Some(SemVer::parse("1.0.0").unwrap()))
 }
 
@@ -19,8 +24,7 @@ fn assert_repo_is_clean(repo: &Repository) {
     assert_eq!(statuses.len(), 0);
 }
 
-
-fn run_clog(dir: &TempDir){
+fn run_clog(dir: &TempDir) {
     cargo_bin_cmd!(pkg_name!())
         .arg("--yes")
         .current_dir(&dir)
@@ -29,7 +33,7 @@ fn run_clog(dir: &TempDir){
         .stderr("");
 }
 
-fn run_clog_stable_release(dir: &TempDir){
+fn run_clog_stable_release(dir: &TempDir) {
     cargo_bin_cmd!(pkg_name!())
         .arg("--yes")
         .arg("--stable")
@@ -81,7 +85,6 @@ fn stable_branches_repo_dir() -> TempDir {
     tmp_dir
 }
 
-
 #[rstest]
 #[case(pre_stable_simple_repo_dir())]
 #[case(pre_stable_branches_repo_dir())]
@@ -92,7 +95,6 @@ fn test_bump_commit_version_file(#[case] repo_dir: TempDir) {
     let v2 = get_python_pyroject_version(&repo_dir).unwrap();
     assert_eq!(v2, SemVer::parse("0.2.0").unwrap());
 }
-
 
 #[rstest]
 #[case(pre_stable_simple_repo_dir())]
@@ -111,7 +113,7 @@ fn test_no_bump(pre_stable_repo_dir: TempDir) {
     assert_eq!(v1, SemVer::parse("0.1.0").unwrap());
     run_clog(&pre_stable_repo_dir);
     let v2 = get_python_pyroject_version(&pre_stable_repo_dir).unwrap();
-   assert_eq!(v1,v2);
+    assert_eq!(v1, v2);
 }
 
 #[rstest]
@@ -128,9 +130,8 @@ fn test_no_bump_stable(#[case] repo_dir: TempDir) {
         .failure();
 
     let v2 = get_python_pyroject_version(&repo_dir).unwrap();
-    assert_eq!(v1,v2);
+    assert_eq!(v1, v2);
 }
-
 
 #[rstest]
 fn test_semver_bump_prestable(
@@ -145,13 +146,10 @@ fn test_semver_bump_prestable(
     empty_commit(&repo, msg3.msg).unwrap();
 
     let v1 = get_python_pyroject_version(&pre_stable_repo_dir).unwrap();
-    assert_eq!(v1, SemVer::parse("0.1.0").unwrap());    
+    assert_eq!(v1, SemVer::parse("0.1.0").unwrap());
     run_clog(&pre_stable_repo_dir);
     let v2 = get_python_pyroject_version(&pre_stable_repo_dir).unwrap();
-    let expected_bump = [msg1.bump, msg2.bump, msg3.bump]
-        .into_iter()
-        .max()
-        .unwrap();
+    let expected_bump = [msg1.bump, msg2.bump, msg3.bump].into_iter().max().unwrap();
     assert_eq!(v2, v1.bump(expected_bump));
     assert_repo_is_clean(&repo);
 }
@@ -170,7 +168,7 @@ fn test_two_semver_bumps_prestable(
     assert_eq!(v1, SemVer::parse("0.1.0").unwrap());
     run_clog(&pre_stable_repo_dir);
 
-    let v2 = get_python_pyroject_version(&pre_stable_repo_dir).unwrap();    
+    let v2 = get_python_pyroject_version(&pre_stable_repo_dir).unwrap();
     assert_eq!(v2, v1.bump(msg1.bump));
     assert_repo_is_clean(&repo);
 
@@ -180,10 +178,7 @@ fn test_two_semver_bumps_prestable(
 
     let v3 = get_python_pyroject_version(&pre_stable_repo_dir).unwrap();
 
-    let expected_bump = [msg2.bump, msg3.bump]
-        .into_iter()
-        .max()
-        .unwrap();
+    let expected_bump = [msg2.bump, msg3.bump].into_iter().max().unwrap();
     assert_eq!(v3, v2.bump(expected_bump));
     assert_repo_is_clean(&repo);
 }
@@ -201,13 +196,10 @@ fn test_semver_bump_stable(
     empty_commit(&repo, msg3.msg).unwrap();
 
     let v1 = get_python_pyroject_version(&stable_repo_dir).unwrap();
-    assert_eq!(v1, SemVer::parse("1.0.0").unwrap());    
+    assert_eq!(v1, SemVer::parse("1.0.0").unwrap());
     run_clog(&stable_repo_dir);
     let v2 = get_python_pyroject_version(&stable_repo_dir).unwrap();
-    let expected_bump = [msg1.bump, msg2.bump, msg3.bump]
-        .into_iter()
-        .max()
-        .unwrap();
+    let expected_bump = [msg1.bump, msg2.bump, msg3.bump].into_iter().max().unwrap();
     assert_eq!(v2, v1.bump(expected_bump));
     assert_repo_is_clean(&repo);
 }
@@ -226,7 +218,7 @@ fn test_two_semver_bumps_stable(
     assert_eq!(v1, SemVer::parse("1.0.0").unwrap());
     run_clog(&stable_repo_dir);
 
-    let v2 = get_python_pyroject_version(&stable_repo_dir).unwrap();    
+    let v2 = get_python_pyroject_version(&stable_repo_dir).unwrap();
     assert_eq!(v2, v1.bump(msg1.bump));
     assert_repo_is_clean(&repo);
 
@@ -236,10 +228,7 @@ fn test_two_semver_bumps_stable(
 
     let v3 = get_python_pyroject_version(&stable_repo_dir).unwrap();
 
-    let expected_bump = [msg2.bump, msg3.bump]
-        .into_iter()
-        .max()
-        .unwrap();
+    let expected_bump = [msg2.bump, msg3.bump].into_iter().max().unwrap();
     assert_eq!(v3, v2.bump(expected_bump));
     assert_repo_is_clean(&repo);
 }

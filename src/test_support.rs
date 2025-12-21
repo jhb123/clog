@@ -3,13 +3,9 @@ use clap::ValueEnum;
 use git2::{build::CheckoutBuilder, Commit, Oid, Repository, Signature};
 use inquire::Confirm;
 use names::{Generator, Name};
-use std::{
-    fs,
-    path::Path,
-    process::exit,
-};
+use std::{fs, path::Path, process::exit};
 
-use crate::{Project, python::PyProject, repo_has_commits, semver::SemVer};
+use crate::{python::PyProject, repo_has_commits, semver::SemVer, Project};
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Default, Debug)]
 pub enum RepoStyle {
@@ -20,7 +16,10 @@ pub enum RepoStyle {
     Branches,
 }
 
-pub fn simple_repo<P: AsRef<std::path::Path>, F: Fn(&P) -> anyhow::Result<Repository>>(path: &P, init_repo: F) -> anyhow::Result<()> {
+pub fn simple_repo<P: AsRef<std::path::Path>, F: Fn(&P) -> anyhow::Result<Repository>>(
+    path: &P,
+    init_repo: F,
+) -> anyhow::Result<()> {
     let repo = init_repo(path)?;
 
     empty_commit(
@@ -34,7 +33,10 @@ pub fn simple_repo<P: AsRef<std::path::Path>, F: Fn(&P) -> anyhow::Result<Reposi
     Ok(())
 }
 
-pub fn branches_repo<P: AsRef<std::path::Path>, F: Fn(&P) -> anyhow::Result<Repository>>(path: &P, init_repo: F) -> anyhow::Result<()> {
+pub fn branches_repo<P: AsRef<std::path::Path>, F: Fn(&P) -> anyhow::Result<Repository>>(
+    path: &P,
+    init_repo: F,
+) -> anyhow::Result<()> {
     let repo = init_repo(path)?;
     let mut generator = Generator::with_naming(Name::Numbered);
     let branch_name = generator.next().unwrap();
@@ -92,13 +94,12 @@ fn check_repo_has_commits(repo: &Repository) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-
-
-pub fn init_python_repo<P: AsRef<std::path::Path>>(path: &P, version: Option<SemVer>) -> anyhow::Result<Repository> {
+pub fn init_python_repo<P: AsRef<std::path::Path>>(
+    path: &P,
+    version: Option<SemVer>,
+) -> anyhow::Result<Repository> {
     let repo = Repository::open(path)
-        .or_else(|_| {
-            Repository::init(path)
-        })
+        .or_else(|_| Repository::init(path))
         .map_err(|_| anyhow::anyhow!("Failed to open repo"))?;
     if !repo_has_commits(&repo) {
         pyproject_init_commit(&repo, version)?;
@@ -108,7 +109,7 @@ pub fn init_python_repo<P: AsRef<std::path::Path>>(path: &P, version: Option<Sem
 
 /// Given a directory containing a python project, parse the
 /// version from the pyproject.toml
-pub fn get_python_pyroject_version<P: AsRef<std::path::Path>>(dir: &P) -> anyhow::Result<SemVer>{
+pub fn get_python_pyroject_version<P: AsRef<std::path::Path>>(dir: &P) -> anyhow::Result<SemVer> {
     let p = PyProject::from_dir(dir.as_ref())?;
     Ok(p.get_version())
 }
