@@ -2,44 +2,10 @@ use assert_cmd::{cargo::cargo_bin_cmd, pkg_name};
 use assert_fs::fixture::TempDir;
 use clog::{
     semver::{SemVer, SemVerBump},
-    test_support::{
-        branches_repo, empty_commit, get_python_pyroject_version, init_python_repo, simple_repo,
-    },
+    test_support::*,
 };
 use git2::Repository;
-use once_cell::sync::Lazy;
-use regex::Regex;
 use rstest::*;
-
-static CLOG_MSG: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(
-        r"(?m)^chore: bump version (?P<from>\d+\.\d+\.\d+) -> (?P<to>\d+\.\d+\.\d+)$\n\n^Bumped-by: clog$"
-    ).unwrap()
-});
-
-fn init_python_repo_0_1_0<P: AsRef<std::path::Path>>(path: &P) -> anyhow::Result<Repository> {
-    init_python_repo(&path, Some(SemVer::parse("0.1.0").unwrap()))
-}
-
-fn init_python_repo_1_0_0<P: AsRef<std::path::Path>>(path: &P) -> anyhow::Result<Repository> {
-    init_python_repo(&path, Some(SemVer::parse("1.0.0").unwrap()))
-}
-
-/// This must be used after clog is run to ensure the repository is clean
-/// due to how the git2 library works.
-fn assert_repo_is_clean(repo: &Repository) {
-    let statuses = repo.statuses(None).unwrap();
-    assert_eq!(statuses.len(), 0);
-}
-
-fn assert_clog_commit_version(dir: &TempDir, version: SemVer) {
-    let repo = Repository::open(dir).unwrap();
-    let head_commit = repo.head().and_then(|h| h.peel_to_commit()).unwrap();
-    let caps = CLOG_MSG
-        .captures(head_commit.message_raw().unwrap())
-        .unwrap();
-    assert_eq!(version, SemVer::parse(&caps["to"]).unwrap());
-}
 
 fn run_clog(dir: &TempDir) {
     cargo_bin_cmd!(pkg_name!())
@@ -107,10 +73,10 @@ fn stable_branches_repo_dir() -> TempDir {
 #[case(pre_stable_branches_repo_dir())]
 fn test_bump_commit_version_file(#[case] repo_dir: TempDir) {
     let v1 = get_python_pyroject_version(&repo_dir).unwrap();
-    assert_eq!(v1, SemVer::parse("0.1.0").unwrap());
+    assert_eq!(v1, SemVer::new(0, 1, 0, None, None));
     run_clog(&repo_dir);
     let v2 = get_python_pyroject_version(&repo_dir).unwrap();
-    assert_eq!(v2, SemVer::parse("0.2.0").unwrap());
+    assert_eq!(v2, SemVer::new(0, 2, 0, None, None));
     assert_clog_commit_version(&repo_dir, SemVer::parse("0.2.0").unwrap())
 }
 
@@ -119,17 +85,17 @@ fn test_bump_commit_version_file(#[case] repo_dir: TempDir) {
 #[case(pre_stable_branches_repo_dir())]
 fn test_version_1_version_file(#[case] repo_dir: TempDir) {
     let v1 = get_python_pyroject_version(&repo_dir).unwrap();
-    assert_eq!(v1, SemVer::parse("0.1.0").unwrap());
+    assert_eq!(v1, SemVer::new(0, 1, 0, None, None));
     run_clog_stable_release(&repo_dir);
     let v2 = get_python_pyroject_version(&repo_dir).unwrap();
-    assert_eq!(v2, SemVer::parse("1.0.0").unwrap());
+    assert_eq!(v2, SemVer::new(1, 0, 0, None, None));
     assert_clog_commit_version(&repo_dir, SemVer::parse("1.0.0").unwrap())
 }
 
 #[rstest]
 fn test_no_bump(pre_stable_repo_dir: TempDir) {
     let v1 = get_python_pyroject_version(&pre_stable_repo_dir).unwrap();
-    assert_eq!(v1, SemVer::parse("0.1.0").unwrap());
+    assert_eq!(v1, SemVer::new(0, 1, 0, None, None));
     run_clog(&pre_stable_repo_dir);
     let v2 = get_python_pyroject_version(&pre_stable_repo_dir).unwrap();
     assert_eq!(v1, v2);
@@ -140,7 +106,7 @@ fn test_no_bump(pre_stable_repo_dir: TempDir) {
 #[case(stable_branches_repo_dir())]
 fn test_no_bump_stable(#[case] repo_dir: TempDir) {
     let v1 = get_python_pyroject_version(&repo_dir).unwrap();
-    assert_eq!(v1, SemVer::parse("1.0.0").unwrap());
+    assert_eq!(v1, SemVer::new(1, 0, 0, None, None));
     cargo_bin_cmd!(pkg_name!())
         .arg("--yes")
         .arg("--stable")
@@ -165,7 +131,7 @@ fn test_semver_bump_prestable(
     empty_commit(&repo, msg3.msg).unwrap();
 
     let v1 = get_python_pyroject_version(&pre_stable_repo_dir).unwrap();
-    assert_eq!(v1, SemVer::parse("0.1.0").unwrap());
+    assert_eq!(v1, SemVer::new(0, 1, 0, None, None));
     run_clog(&pre_stable_repo_dir);
     let v2 = get_python_pyroject_version(&pre_stable_repo_dir).unwrap();
     let expected_bump = [msg1.bump, msg2.bump, msg3.bump].into_iter().max().unwrap();
@@ -187,7 +153,7 @@ fn test_two_semver_bumps_prestable(
     empty_commit(&repo, msg1.msg).unwrap();
 
     let v1 = get_python_pyroject_version(&pre_stable_repo_dir).unwrap();
-    assert_eq!(v1, SemVer::parse("0.1.0").unwrap());
+    assert_eq!(v1, SemVer::new(0, 1, 0, None, None));
     run_clog(&pre_stable_repo_dir);
 
     let v2 = get_python_pyroject_version(&pre_stable_repo_dir).unwrap();
@@ -224,7 +190,7 @@ fn test_semver_bump_stable(
     empty_commit(&repo, msg3.msg).unwrap();
 
     let v1 = get_python_pyroject_version(&stable_repo_dir).unwrap();
-    assert_eq!(v1, SemVer::parse("1.0.0").unwrap());
+    assert_eq!(v1, SemVer::new(1, 0, 0, None, None));
     run_clog(&stable_repo_dir);
     let v2 = get_python_pyroject_version(&stable_repo_dir).unwrap();
     let expected_bump = [msg1.bump, msg2.bump, msg3.bump].into_iter().max().unwrap();
@@ -246,7 +212,7 @@ fn test_two_semver_bumps_stable(
     empty_commit(&repo, msg1.msg).unwrap();
 
     let v1 = get_python_pyroject_version(&stable_repo_dir).unwrap();
-    assert_eq!(v1, SemVer::parse("1.0.0").unwrap());
+    assert_eq!(v1, SemVer::new(1, 0, 0, None, None));
     run_clog(&stable_repo_dir);
 
     let v2 = get_python_pyroject_version(&stable_repo_dir).unwrap();
@@ -269,26 +235,3 @@ fn test_two_semver_bumps_stable(
         assert_clog_commit_version(&stable_repo_dir, v2.bump(expected_bump))
     }
 }
-
-#[derive(Debug, Clone, Copy)]
-struct CommitCase {
-    bump: SemVerBump,
-    msg: &'static str,
-}
-
-impl CommitCase {
-    const fn new(bump: SemVerBump, msg: &'static str) -> Self {
-        Self { bump, msg }
-    }
-}
-
-impl std::fmt::Display for CommitCase {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self.bump)
-    }
-}
-
-const PATCH: CommitCase = CommitCase::new(SemVerBump::Patch, "fix: 1");
-const MINOR: CommitCase = CommitCase::new(SemVerBump::Minor, "feat: 1");
-const MAJOR: CommitCase = CommitCase::new(SemVerBump::Major, "feat!: 1");
-const NONE: CommitCase = CommitCase::new(SemVerBump::None, "random");

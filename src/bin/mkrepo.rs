@@ -1,13 +1,8 @@
-use clap::{Parser, ValueEnum};
+use clap::Parser;
 use clog::{semver::SemVer, test_support::*};
-use git2::{build::CheckoutBuilder, Commit, Oid, Repository, Signature};
+use git2::Repository;
 use inquire::Confirm;
-use names::{Generator, Name};
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    process::exit,
-};
+use std::{fs, path::PathBuf};
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]

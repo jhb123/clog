@@ -1,11 +1,47 @@
 use anyhow::Ok;
 use clap::ValueEnum;
-use git2::{build::CheckoutBuilder, Commit, Oid, Repository, Signature};
+use git2::{build::CheckoutBuilder, Commit, Oid, Repository, RepositoryInitOptions, Signature};
 use inquire::Confirm;
 use names::{Generator, Name};
+use once_cell::sync::Lazy;
+use regex::Regex;
 use std::{fs, path::Path, process::exit};
 
-use crate::{python::PyProject, repo_has_commits, semver::SemVer, Project};
+use crate::{
+    python::PyProject,
+    repo_has_commits,
+    semver::{SemVer, SemVerBump},
+    Project,
+};
+
+static CLOG_MSG: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r"(?m)^chore: bump version (?P<from>\d+\.\d+\.\d+) -> (?P<to>\d+\.\d+\.\d+)$\n\n^Bumped-by: clog$"
+    ).unwrap()
+});
+
+pub const PATCH: CommitCase = CommitCase::new(SemVerBump::Patch, "fix: 1");
+pub const MINOR: CommitCase = CommitCase::new(SemVerBump::Minor, "feat: 1");
+pub const MAJOR: CommitCase = CommitCase::new(SemVerBump::Major, "feat!: 1");
+pub const NONE: CommitCase = CommitCase::new(SemVerBump::None, "random");
+
+#[derive(Debug, Clone, Copy)]
+pub struct CommitCase {
+    pub bump: SemVerBump,
+    pub msg: &'static str,
+}
+
+impl CommitCase {
+    const fn new(bump: SemVerBump, msg: &'static str) -> Self {
+        Self { bump, msg }
+    }
+}
+
+impl std::fmt::Display for CommitCase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.bump)
+    }
+}
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Default, Debug)]
 pub enum RepoStyle {
@@ -98,12 +134,26 @@ pub fn init_python_repo<P: AsRef<std::path::Path>>(
     path: &P,
     version: Option<SemVer>,
 ) -> anyhow::Result<Repository> {
-    let repo = Repository::open(path)
-        .or_else(|_| Repository::init(path))
-        .map_err(|_| anyhow::anyhow!("Failed to open repo"))?;
+    let mut opts = RepositoryInitOptions::new();
+    opts.bare(false)
+        .no_reinit(true)
+        .mkpath(false)
+        .initial_head("main")
+        .external_template(false);
+
+    let repo = Repository::init_opts(path, &opts)?;
+
+    let mut cfg = repo.config()?;
+    cfg.set_bool("core.fsync", false)?;
+    cfg.set_bool("core.fsyncObjectFiles", false)?;
+    cfg.set_bool("core.fsyncRefFiles", false)?;
+    cfg.set_bool("core.logAllRefUpdates", false)?;
+
+    // Only commit once
     if !repo_has_commits(&repo) {
         pyproject_init_commit(&repo, version)?;
     }
+
     Ok(repo)
 }
 
@@ -242,4 +292,28 @@ fn pyproject_init_commit(repo: &Repository, version: Option<SemVer>) -> anyhow::
     }
     repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])?;
     Ok(())
+}
+
+pub fn init_python_repo_0_1_0<P: AsRef<std::path::Path>>(path: &P) -> anyhow::Result<Repository> {
+    init_python_repo(&path, Some(SemVer::new(0, 1, 0, None, None)))
+}
+
+pub fn init_python_repo_1_0_0<P: AsRef<std::path::Path>>(path: &P) -> anyhow::Result<Repository> {
+    init_python_repo(&path, Some(SemVer::new(1, 0, 0, None, None)))
+}
+
+/// This must be used after clog is run to ensure the repository is clean
+/// due to how the git2 library works.
+pub fn assert_repo_is_clean(repo: &Repository) {
+    let statuses = repo.statuses(None).unwrap();
+    assert_eq!(statuses.len(), 0);
+}
+
+pub fn assert_clog_commit_version<P: AsRef<std::path::Path>>(dir: &P, version: SemVer) {
+    let repo = Repository::open(dir).unwrap();
+    let head_commit = repo.head().and_then(|h| h.peel_to_commit()).unwrap();
+    let caps = CLOG_MSG
+        .captures(head_commit.message_raw().unwrap())
+        .unwrap();
+    assert_eq!(version, SemVer::parse(&caps["to"]).unwrap());
 }
