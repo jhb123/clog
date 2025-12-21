@@ -94,14 +94,14 @@ fn check_repo_has_commits(repo: &Repository) -> Result<(), anyhow::Error> {
 
 
 
-pub fn init_python_repo<P: AsRef<std::path::Path>>(path: &P) -> anyhow::Result<Repository> {
+pub fn init_python_repo<P: AsRef<std::path::Path>>(path: &P, version: Option<SemVer>) -> anyhow::Result<Repository> {
     let repo = Repository::open(path)
         .or_else(|_| {
             Repository::init(path)
         })
         .map_err(|_| anyhow::anyhow!("Failed to open repo"))?;
     if !repo_has_commits(&repo) {
-        pyproject_init_commit(&repo)?;
+        pyproject_init_commit(&repo, version)?;
     }
     Ok(repo)
 }
@@ -200,13 +200,16 @@ fn merge_commits(
     Ok(())
 }
 
-fn make_pyproject(path: &Path) {
-    let data = include_str!("pyproject.toml.example");
+fn make_pyproject(path: &Path, version: Option<SemVer>) {
+    let mut data = include_str!("pyproject.toml.example").to_string();
+    if let Some(v) = version {
+        data = data.replace("0.1.0", &v.to_string());
+    }
     fs::write(path, format!("{data}")).unwrap();
 }
 
 /// Create a commit with a message on the current branch
-fn pyproject_init_commit(repo: &Repository) -> anyhow::Result<()> {
+fn pyproject_init_commit(repo: &Repository, version: Option<SemVer>) -> anyhow::Result<()> {
     let sig = Signature::now("Test User", "test@example.com")?;
 
     let mut pyproject_path = repo
@@ -215,7 +218,7 @@ fn pyproject_init_commit(repo: &Repository) -> anyhow::Result<()> {
         .expect("git repo has no parent")
         .to_path_buf();
     pyproject_path.push("pyproject.toml");
-    make_pyproject(&pyproject_path);
+    make_pyproject(&pyproject_path, version);
 
     let tree_id = {
         let mut index = repo.index()?;
