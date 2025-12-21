@@ -3,8 +3,8 @@ use std::path::Path;
 use anyhow::{anyhow, Context, Error};
 use clap::Parser;
 use clog::{
-    detect_project, get_next_version, make_bump_commit, make_initial_commit, repo_has_commits,
-    repo_is_clean, semver::SemVer, Config, Project,
+    detect_project, get_next_version, make_bump_commit, make_initial_stable_commit, repo_has_commits,
+    repo_is_clean, semver::SemVer, Config,
 };
 use git2::Repository;
 use inquire::Confirm;
@@ -25,8 +25,6 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let current_dir = Path::new("./");
     let config = Config::new(&current_dir);
-    let mut project = detect_project(&config)?;
-
     let repo = Repository::open(current_dir)
         .with_context(|| format!("Failed to open repo at {:?}", current_dir.canonicalize()))?;
 
@@ -39,20 +37,20 @@ fn main() -> anyhow::Result<()> {
     }
 
     if cli.stable {
-        major_version_one(project.as_mut(), &repo, &config, cli.yes)
+        major_version_one(&repo, &config, cli.yes)
     } else {
-        bump_release(project.as_mut(), &repo, &config, cli.yes)
+        bump_release(&repo, &config, cli.yes)
     }
 }
 
 fn bump_release(
-    project: &mut dyn Project,
     repo: &Repository,
     config: &Config,
     auto_yes: bool,
 ) -> anyhow::Result<()> {
+    let mut project = detect_project(&config)?;
     let current_version = project.get_version().clone();
-    let new_version = get_next_version(repo, project, config).unwrap();
+    let new_version = get_next_version(repo, project.as_ref(), config).unwrap();
 
     if new_version > current_version {
         let should_bump = if auto_yes {
@@ -74,7 +72,7 @@ fn bump_release(
         };
 
         if should_bump {
-            make_bump_commit(repo, project, config)?;
+            make_bump_commit(repo, project.as_mut(), config)?;
         }
     } else {
         println!("No release required")
@@ -84,11 +82,12 @@ fn bump_release(
 }
 
 fn major_version_one(
-    project: &mut dyn Project,
     repo: &Repository,
     config: &Config,
     auto_yes: bool,
 ) -> anyhow::Result<()> {
+    let mut project = detect_project(&config)?;
+
     if SemVer::version_1_0_0() <= project.get_version() {
         return Err(Error::msg(format!(
             "This repo already has released {}",
@@ -116,7 +115,7 @@ fn major_version_one(
     };
 
     if should_release {
-        make_initial_commit(repo, project, config)?;
+        make_initial_stable_commit(repo, project.as_mut(), config)?;
     }
 
     Ok(())

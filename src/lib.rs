@@ -312,7 +312,7 @@ pub fn make_bump_commit(
 }
 
 /// Create the initial release commit on the current branch
-pub fn make_initial_commit(
+pub fn make_initial_stable_commit(
     repo: &Repository,
     project: &mut dyn Project,
     config: &Config,
@@ -381,7 +381,8 @@ fn append_changelog(
 ) -> anyhow::Result<()> {
     let mut path = repo.commondir().parent().unwrap().to_path_buf();
     path.push(project.get_changelog());
-    let mut new_changelog_entry = format!("# Version {}", get_next_version(repo, project, config)?);
+    let mut new_changelog_entry =
+        format!("# Version {}", get_next_version(repo, project, config)?);
     let since_oid = get_latest_release(repo, project)?;
     let upto_oid = get_head(repo).unwrap();
     let mut revwalk = repo.revwalk()?;
