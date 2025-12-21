@@ -114,7 +114,7 @@ pub fn get_python_pyroject_version<P: AsRef<std::path::Path>>(dir: &P) -> anyhow
 }
 
 /// Create an empty commit with a message on the current branch
-fn empty_commit(repo: &Repository, message: &str) -> anyhow::Result<Oid> {
+pub fn empty_commit(repo: &Repository, message: &str) -> anyhow::Result<Oid> {
     let sig = Signature::now("Test User", "test@example.com")?;
 
     // get git into the "stage changes" stage
