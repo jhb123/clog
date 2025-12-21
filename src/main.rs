@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::Path;
 
 use anyhow::{anyhow, Context, Error};
 use clap::Parser;
@@ -12,12 +12,10 @@ use inquire::Confirm;
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Cli {
-    /// Sets parent directory of test repo
-    #[clap(short, long, value_name = "FILE", default_value = "./")]
-    path: PathBuf,
     
-    #[clap(short, long, value_name = "initial-release", default_value = "false")]
-    initial: bool,
+    /// Declare stable and bump to v1.0.0
+    #[clap(short, long, default_value = "false")]
+    stable: bool,
     
     /// Skip confirmation prompts (automatically answer yes)
     #[arg(short = 'y', long)]
@@ -26,12 +24,12 @@ struct Cli {
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-
-    let config = Config::new(&cli.path);
+    let current_dir = Path::new("./");
+    let config = Config::new(&current_dir);
     let project = detect_project(&config)?;
 
-    let repo = Repository::open(&cli.path)
-        .with_context(|| format!("Failed to open repo at {:?}", cli.path))?;
+    let repo = Repository::open(current_dir)
+        .with_context(|| format!("Failed to open repo at {:?}", current_dir.canonicalize()))?;
 
     if !repo_has_commits(&repo) {
         return Err(anyhow!("Repo has no commits"));
@@ -41,7 +39,7 @@ fn main() -> anyhow::Result<()> {
         return Err(anyhow!("Repo is not in a clean state. Commit your changes"));
     }
 
-    if cli.initial {
+    if cli.stable {
         major_version_one(project, &repo, &config, cli.yes)
     } else {
         bump_release(project, &repo, &config, cli.yes)
@@ -106,7 +104,7 @@ fn major_version_one(
     );
 
     let should_release = if auto_yes {
-        println!("Creating initial release v1.0.0");
+        println!("Creating release v1.0.0");
         true
     } else {
         Confirm::new("Would you like to make the first release of this project?")

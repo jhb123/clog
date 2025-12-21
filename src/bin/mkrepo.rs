@@ -1,5 +1,5 @@
 use clap::{Parser, ValueEnum};
-use clog::test_support::*;
+use clog::{semver::SemVer, test_support::*};
 use git2::{build::CheckoutBuilder, Commit, Oid, Repository, Signature};
 use inquire::Confirm;
 use names::{Generator, Name};
@@ -51,5 +51,5 @@ fn init_repo(path: &PathBuf) -> anyhow::Result<Repository> {
         }
     }
 
-    init_python_repo(path)
+    init_python_repo(path, Some(SemVer::parse("0.1.0").unwrap()))
 }
