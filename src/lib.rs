@@ -529,6 +529,7 @@ fn find_first_version_of_project(
 #[cfg(test)]
 mod test {
     use assert_fs::TempDir;
+    use fs_extra::{copy_items, dir};
     use git2::Repository;
     use rstest::{fixture, rstest};
 
@@ -536,16 +537,42 @@ mod test {
     use crate::*;
 
     #[fixture]
-    fn pre_stable_repo_dir() -> TempDir {
+    #[once]
+    fn cached_pre_stable_repo_dir() -> TempDir {
         let tmp_dir = TempDir::new().unwrap();
         init_python_repo_0_1_0(&tmp_dir).unwrap();
         tmp_dir
     }
 
     #[fixture]
-    fn stable_repo_dir() -> TempDir {
+    #[once]
+    fn cached_stable_repo_dir() -> TempDir {
         let tmp_dir = TempDir::new().unwrap();
         init_python_repo_1_0_0(&tmp_dir).unwrap();
+        tmp_dir
+    }
+
+    #[fixture]
+    fn pre_stable_repo_dir(cached_pre_stable_repo_dir: &TempDir) -> TempDir {
+        let tmp_dir = TempDir::new().unwrap();
+        let options = dir::CopyOptions::new();
+        let items: Vec<_> = std::fs::read_dir(cached_pre_stable_repo_dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .collect();
+        copy_items(&items, &tmp_dir, &options).unwrap();
+        tmp_dir
+    }
+
+    #[fixture]
+    fn stable_repo_dir(cached_stable_repo_dir: &TempDir) -> TempDir {
+        let tmp_dir = TempDir::new().unwrap();
+        let options = dir::CopyOptions::new();
+        let items: Vec<_> = std::fs::read_dir(cached_stable_repo_dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .collect();
+        copy_items(&items, &tmp_dir, &options).unwrap();
         tmp_dir
     }
 
@@ -577,16 +604,26 @@ mod test {
         tmp_dir
     }
 
+    fn test_bump_helper(dir: &TempDir, repo: &Repository) {
+        let config = Config::new(dir);
+        let mut project = detect_project(&config).unwrap();
+        make_bump_commit(repo, project.as_mut(), &config).unwrap();
+    }
+
+    fn test_initial_stable_helper(dir: &TempDir, repo: &Repository) {
+        let config = Config::new(dir);
+        let mut project = detect_project(&config).unwrap();
+        make_initial_stable_commit(repo, project.as_mut(), &config).unwrap();
+    }
+
     #[rstest]
-    fn test_make_bump_commit(
+    fn test_make_bump_commit_prestable(
         pre_stable_repo_dir: TempDir,
         #[values(PATCH, MINOR, MAJOR, NONE)] msg1: CommitCase,
         #[values(PATCH, MINOR, MAJOR, NONE)] msg2: CommitCase,
         #[values(PATCH, MINOR, MAJOR, NONE)] msg3: CommitCase,
         #[values(PATCH, MINOR, MAJOR, NONE)] msg4: CommitCase,
     ) {
-        let config = Config::new(&pre_stable_repo_dir);
-        let mut project = detect_project(&config).unwrap();
         let repo = Repository::open(&pre_stable_repo_dir).unwrap();
         empty_commit(&repo, msg1.msg).unwrap();
         empty_commit(&repo, msg2.msg).unwrap();
@@ -595,7 +632,7 @@ mod test {
 
         let v1 = get_python_pyroject_version(&pre_stable_repo_dir).unwrap();
         assert_eq!(v1, SemVer::version_0_1_0());
-        make_bump_commit(&repo, project.as_mut(), &config).unwrap();
+        test_bump_helper(&pre_stable_repo_dir, &repo);
         let v2 = get_python_pyroject_version(&pre_stable_repo_dir).unwrap();
         let expected_bump = [msg1.bump, msg2.bump, msg3.bump, msg4.bump]
             .into_iter()
@@ -604,6 +641,116 @@ mod test {
         assert_eq!(v2, v1.bump(expected_bump));
         if expected_bump != SemVerBump::None {
             assert_clog_commit_version(&pre_stable_repo_dir, v1.bump(expected_bump))
+        }
+    }
+
+    #[rstest]
+    fn test_make_bump_commit_stable(
+        stable_repo_dir: TempDir,
+        #[values(PATCH, MINOR, MAJOR, NONE)] msg1: CommitCase,
+        #[values(PATCH, MINOR, MAJOR, NONE)] msg2: CommitCase,
+        #[values(PATCH, MINOR, MAJOR, NONE)] msg3: CommitCase,
+        #[values(PATCH, MINOR, MAJOR, NONE)] msg4: CommitCase,
+    ) {
+        let repo = Repository::open(&stable_repo_dir).unwrap();
+        empty_commit(&repo, msg1.msg).unwrap();
+        empty_commit(&repo, msg2.msg).unwrap();
+        empty_commit(&repo, msg3.msg).unwrap();
+        empty_commit(&repo, msg4.msg).unwrap();
+
+        let v1 = get_python_pyroject_version(&stable_repo_dir).unwrap();
+        assert_eq!(v1, SemVer::version_1_0_0());
+        test_bump_helper(&stable_repo_dir, &repo);
+        let v2 = get_python_pyroject_version(&stable_repo_dir).unwrap();
+        let expected_bump = [msg1.bump, msg2.bump, msg3.bump, msg4.bump]
+            .into_iter()
+            .max()
+            .unwrap();
+        assert_eq!(v2, v1.bump(expected_bump));
+        if expected_bump != SemVerBump::None {
+            assert_clog_commit_version(&stable_repo_dir, v1.bump(expected_bump))
+        }
+    }
+    #[rstest]
+    #[case(pre_stable_simple_repo_dir())]
+    #[case(pre_stable_branches_repo_dir())]
+    fn test_version_1_version_file(#[case] repo_dir: TempDir) {
+        let repo = Repository::open(&repo_dir).unwrap();
+        let v1 = get_python_pyroject_version(&repo_dir).unwrap();
+        assert_eq!(v1, SemVer::new(0, 1, 0, None, None));
+        test_initial_stable_helper(&repo_dir, &repo);
+        let v2 = get_python_pyroject_version(&repo_dir).unwrap();
+        assert_eq!(v2, SemVer::new(1, 0, 0, None, None));
+        assert_clog_commit_version(&repo_dir, SemVer::parse("1.0.0").unwrap())
+    }
+
+    #[rstest]
+    fn test_two_semver_bumps_prestable(
+        pre_stable_repo_dir: TempDir,
+        #[values(PATCH, MINOR, MAJOR)] msg1: CommitCase,
+        #[values(PATCH, MINOR, MAJOR, NONE)] msg2: CommitCase,
+        #[values(PATCH, MINOR, MAJOR, NONE)] msg3: CommitCase,
+    ) {
+        let repo = Repository::open(&pre_stable_repo_dir).unwrap();
+        empty_commit(&repo, msg1.msg).unwrap();
+
+        let v1 = get_python_pyroject_version(&pre_stable_repo_dir).unwrap();
+        assert_eq!(v1, SemVer::new(0, 1, 0, None, None));
+        test_bump_helper(&pre_stable_repo_dir, &repo);
+
+        let v2 = get_python_pyroject_version(&pre_stable_repo_dir).unwrap();
+        assert_eq!(v2, v1.bump(msg1.bump));
+        assert_repo_is_clean(&repo);
+        if msg1.bump != SemVerBump::None {
+            assert_clog_commit_version(&pre_stable_repo_dir, v1.bump(msg1.bump))
+        }
+
+        empty_commit(&repo, msg2.msg).unwrap();
+        empty_commit(&repo, msg3.msg).unwrap();
+        test_bump_helper(&pre_stable_repo_dir, &repo);
+
+        let v3 = get_python_pyroject_version(&pre_stable_repo_dir).unwrap();
+
+        let expected_bump = [msg2.bump, msg3.bump].into_iter().max().unwrap();
+        assert_eq!(v3, v2.bump(expected_bump));
+        if expected_bump != SemVerBump::None {
+            assert_clog_commit_version(&pre_stable_repo_dir, v2.bump(expected_bump));
+            assert_repo_is_clean(&repo);
+        }
+    }
+
+    #[rstest]
+    fn test_two_semver_bumps_stable(
+        stable_repo_dir: TempDir,
+        #[values(PATCH, MINOR, MAJOR)] msg1: CommitCase,
+        #[values(PATCH, MINOR, MAJOR, NONE)] msg2: CommitCase,
+        #[values(PATCH, MINOR, MAJOR, NONE)] msg3: CommitCase,
+    ) {
+        let repo = Repository::open(&stable_repo_dir).unwrap();
+        empty_commit(&repo, msg1.msg).unwrap();
+
+        let v1 = get_python_pyroject_version(&stable_repo_dir).unwrap();
+        assert_eq!(v1, SemVer::new(1, 0, 0, None, None));
+        test_bump_helper(&stable_repo_dir, &repo);
+
+        let v2 = get_python_pyroject_version(&stable_repo_dir).unwrap();
+        assert_eq!(v2, v1.bump(msg1.bump));
+        assert_repo_is_clean(&repo);
+        if msg1.bump != SemVerBump::None {
+            assert_clog_commit_version(&stable_repo_dir, v1.bump(msg1.bump))
+        }
+
+        empty_commit(&repo, msg2.msg).unwrap();
+        empty_commit(&repo, msg3.msg).unwrap();
+        test_bump_helper(&stable_repo_dir, &repo);
+
+        let v3 = get_python_pyroject_version(&stable_repo_dir).unwrap();
+
+        let expected_bump = [msg2.bump, msg3.bump].into_iter().max().unwrap();
+        assert_eq!(v3, v2.bump(expected_bump));
+        if expected_bump != SemVerBump::None {
+            assert_clog_commit_version(&stable_repo_dir, v2.bump(expected_bump));
+            assert_repo_is_clean(&repo);
         }
     }
 }

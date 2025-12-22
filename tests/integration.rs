@@ -4,6 +4,7 @@ use clog::{
     semver::{SemVer, SemVerBump},
     test_support::*,
 };
+use fs_extra::{copy_items, dir};
 use git2::Repository;
 use rstest::*;
 
@@ -25,18 +26,43 @@ fn run_clog_stable_release(dir: &TempDir) {
         .success()
         .stderr("");
 }
-
 #[fixture]
-fn pre_stable_repo_dir() -> TempDir {
+#[once]
+fn cached_pre_stable_repo_dir() -> TempDir {
     let tmp_dir = TempDir::new().unwrap();
     init_python_repo_0_1_0(&tmp_dir).unwrap();
     tmp_dir
 }
 
 #[fixture]
-fn stable_repo_dir() -> TempDir {
+#[once]
+fn cached_stable_repo_dir() -> TempDir {
     let tmp_dir = TempDir::new().unwrap();
     init_python_repo_1_0_0(&tmp_dir).unwrap();
+    tmp_dir
+}
+
+#[fixture]
+fn pre_stable_repo_dir(cached_pre_stable_repo_dir: &TempDir) -> TempDir {
+    let tmp_dir = TempDir::new().unwrap();
+    let options = dir::CopyOptions::new();
+    let items: Vec<_> = std::fs::read_dir(cached_pre_stable_repo_dir.path())
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .collect();
+    copy_items(&items, &tmp_dir, &options).unwrap();
+    tmp_dir
+}
+
+#[fixture]
+fn stable_repo_dir(cached_stable_repo_dir: &TempDir) -> TempDir {
+    let tmp_dir = TempDir::new().unwrap();
+    let options = dir::CopyOptions::new();
+    let items: Vec<_> = std::fs::read_dir(cached_stable_repo_dir.path())
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .collect();
+    copy_items(&items, &tmp_dir, &options).unwrap();
     tmp_dir
 }
 
