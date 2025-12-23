@@ -4,14 +4,9 @@ use git2::{Repository, Sort};
 
 use crate::{
     find_first_version_of_project, get_changelog_message, get_head, get_latest_release,
-    get_next_version, is_version_bump, semver::SemVer, Config, Project,
+    get_next_version, is_version_bump, Config, Project,
 };
 
-enum ChangeLogEntry {
-    BumpVersion(SemVer),
-    InitialVersion(SemVer),
-    Entry(String),
-}
 
 pub fn prepare_changelog(
     repo: &Repository,
@@ -35,7 +30,7 @@ fn append_changelog(
 ) -> anyhow::Result<()> {
     let mut path = repo.commondir().parent().unwrap().to_path_buf();
     path.push(project.get_changelog());
-    let mut changelog_entries = vec![ChangeLogEntry::BumpVersion(get_next_version(
+    let mut changelog_entries = vec![render::ChangeLogEntry::BumpVersion(get_next_version(
         repo, project, config,
     )?)];
 
@@ -53,12 +48,12 @@ fn append_changelog(
         let oid = oid_result?;
         let commit = repo.find_commit(oid)?;
         if let Some(s) = get_changelog_message(&commit, config) {
-            changelog_entries.push(ChangeLogEntry::Entry(s));
+            changelog_entries.push(render::ChangeLogEntry::Entry(s));
         }
     }
 
     let original = fs::read_to_string(&path)?;
-    let changelog = prepend_render_changelog(&changelog_entries, &original, config);
+    let changelog = render::prepend_render_changelog(&changelog_entries, &original, config);
 
     fs::write(&path, changelog)?;
     Ok(())
@@ -69,7 +64,7 @@ fn generate_entire_changelog(
     project: &mut dyn Project,
     config: &Config,
 ) -> anyhow::Result<()> {
-    let mut changelog_entries = vec![ChangeLogEntry::BumpVersion(get_next_version(
+    let mut changelog_entries = vec![render::ChangeLogEntry::BumpVersion(get_next_version(
         repo, project, config,
     )?)];
 
@@ -82,19 +77,19 @@ fn generate_entire_changelog(
         let oid = oid_result?;
         let commit = repo.find_commit(oid)?;
         if let Some(version) = is_version_bump(&commit, repo, project)? {
-            changelog_entries.push(ChangeLogEntry::BumpVersion(version));
+            changelog_entries.push(render::ChangeLogEntry::BumpVersion(version));
         }
 
         if let Some(s) = get_changelog_message(&commit, config) {
-            changelog_entries.push(ChangeLogEntry::Entry(s));
+            changelog_entries.push(render::ChangeLogEntry::Entry(s));
         }
     }
 
     if let Some(version) = find_first_version_of_project(repo, project)? {
-        changelog_entries.push(ChangeLogEntry::InitialVersion(version));
+        changelog_entries.push(render::ChangeLogEntry::InitialVersion(version));
     }
 
-    let changelog = render_changelog(&changelog_entries, config);
+    let changelog = render::render_changelog(&changelog_entries, config);
 
     let mut path = repo
         .commondir()
@@ -110,30 +105,40 @@ fn generate_entire_changelog(
     Ok(())
 }
 
-fn render_changelog(changelog_entries: &[ChangeLogEntry], _config: &Config) -> String {
-    let mut changelog = String::new();
-    for entry in changelog_entries {
-        match entry {
-            ChangeLogEntry::BumpVersion(sem_ver) => {
-                changelog.push_str(&format!("# Version {}", sem_ver));
-            }
-            ChangeLogEntry::InitialVersion(sem_ver) => {
-                changelog.push_str(&format!("# Version {}\nInitial Commit", sem_ver));
-            }
-            ChangeLogEntry::Entry(msg) => {
-                changelog.push_str(msg);
-            }
-        }
-        changelog.push('\n');
-    }
-    changelog
-}
+mod render {
+    use crate::{Config, semver::SemVer};
 
-fn prepend_render_changelog(
-    changelog_entries: &[ChangeLogEntry],
-    original_changelog: &str,
-    config: &Config,
-) -> String {
-    let new_changelog = render_changelog(changelog_entries, config);
-    format!("{new_changelog}{original_changelog}")
+    pub enum ChangeLogEntry {
+        BumpVersion(SemVer),
+        InitialVersion(SemVer),
+        Entry(String),
+    }
+
+    pub fn render_changelog(changelog_entries: &[ChangeLogEntry], _config: &Config) -> String {
+        let mut changelog = String::new();
+        for entry in changelog_entries {
+            match entry {
+                ChangeLogEntry::BumpVersion(sem_ver) => {
+                    changelog.push_str(&format!("# Version {}", sem_ver));
+                }
+                ChangeLogEntry::InitialVersion(sem_ver) => {
+                    changelog.push_str(&format!("# Version {}\nInitial Commit", sem_ver));
+                }
+                ChangeLogEntry::Entry(msg) => {
+                    changelog.push_str(msg);
+                }
+            }
+            changelog.push('\n');
+        }
+        changelog
+    }
+
+    pub fn prepend_render_changelog(
+        changelog_entries: &[ChangeLogEntry],
+        original_changelog: &str,
+        config: &Config,
+    ) -> String {
+        let new_changelog = render_changelog(changelog_entries, config);
+        format!("{new_changelog}{original_changelog}")
+    }
 }

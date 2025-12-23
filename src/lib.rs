@@ -1,4 +1,5 @@
 mod changelog;
+mod git;
 mod python;
 mod rust;
 pub mod semver;
@@ -144,6 +145,11 @@ impl Default for Patterns {
         DEFAULT_PATTERNS.clone()
     }
 }
+
+// enum CommitKind {
+//     Release,
+
+// }
 
 pub fn repo_has_commits(repo: &Repository) -> bool {
     repo.head().ok().and_then(|h| h.target()).is_some()
