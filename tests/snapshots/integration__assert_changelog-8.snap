@@ -1,8 +1,0 @@
----
-source: tests/integration.rs
-expression: changelog
----
-# Version 2.0.0
-feat!: 1
-# Version 1.0.0
-Initial Commit

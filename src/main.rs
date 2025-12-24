@@ -3,8 +3,8 @@ use std::path::Path;
 use anyhow::{anyhow, Context, Error};
 use clap::Parser;
 use clog::{
-    detect_project, get_next_version, make_bump_commit, make_initial_stable_commit,
-    repo_has_commits, repo_is_clean, semver::SemVer, Config,
+    detect_project, get_next_version, git::GitHistory, make_bump_commit,
+    make_initial_stable_commit, repo_has_commits, repo_is_clean, semver::SemVer, Config,
 };
 use git2::Repository;
 use inquire::Confirm;
@@ -46,7 +46,11 @@ fn main() -> anyhow::Result<()> {
 fn bump_release(repo: &Repository, config: &Config, auto_yes: bool) -> anyhow::Result<()> {
     let mut project = detect_project(config)?;
     let current_version = project.get_version().clone();
-    let new_version = get_next_version(repo, project.as_ref(), config).unwrap();
+    let history = GitHistory::new(project.as_ref(), repo);
+    let new_version = match get_next_version(history, config) {
+        Some(v) => v,
+        None => current_version.clone(),
+    };
 
     if new_version > current_version {
         let should_bump = if auto_yes {

@@ -1,5 +1,5 @@
 mod changelog;
-mod git;
+pub mod git;
 mod python;
 mod rust;
 pub mod semver;
@@ -9,7 +9,7 @@ use std::{
     vec,
 };
 
-use git2::{Commit, Oid, Repository, Signature, Sort, StatusOptions};
+use git2::{Oid, Repository, Signature, StatusOptions};
 use once_cell::sync::Lazy;
 use regex::Regex;
 
@@ -17,6 +17,7 @@ use regex::Regex;
 pub mod test_support;
 
 use crate::{
+    git::{CommitWrapper, GitHistory},
     python::PyProject,
     rust::CargoProject,
     semver::{SemVer, SemVerBump},
@@ -36,67 +37,10 @@ pub trait Project {
     where
         Self: Sized;
     fn get_dir(&self) -> &Path;
-    fn bump(&mut self, bump: SemVerBump);
+    fn set_version(&mut self, bump: SemVer);
     fn write(&self) -> anyhow::Result<()>;
     fn get_version_file(&self) -> &Path; // needs to be dyn compatible
     fn set_initial_release(&mut self) -> anyhow::Result<()>;
-    fn get_latest_release(&self, repo: &Repository) -> anyhow::Result<Option<Oid>> {
-        let mut revwalk = repo.revwalk()?;
-        revwalk.push_head()?;
-        revwalk.set_sorting(Sort::TOPOLOGICAL)?;
-
-        for oid_result in revwalk {
-            let oid = oid_result?; // fail if object db is corrupt
-                                   // revwalk only has commits because we didn't pass anything
-                                   // apart from commits to the revwalk
-            let commit = repo.find_commit(oid)?;
-
-            // handle first commit...
-            let tree = commit.tree()?;
-
-            let parent = match commit.parent(0) {
-                Ok(c) => c,
-                Err(_) => {
-                    if tree.get_path(self.get_version_file()).is_ok() {
-                        return Ok(Some(oid)); // version file first appears here
-                    }
-                    return Ok(None);
-                }
-            };
-
-            let parent_tree = parent.tree()?;
-
-            let entry = tree.get_path(self.get_version_file());
-            let parent_entry = parent_tree.get_path(self.get_version_file());
-
-            let changed = match (entry, parent_entry) {
-                (Ok(e), Ok(pe)) => {
-                    // check the files contents are acually different and it
-                    // not a change in file permission
-                    let oid_e = e.to_object(repo)?.peel_to_blob()?.id();
-                    let oid_pe = pe.to_object(repo)?.peel_to_blob()?.id();
-                    oid_e != oid_pe // changed
-                }
-                (Ok(_), Err(_)) => true,   // removed
-                (Err(_), Ok(_)) => true,   // added
-                (Err(_), Err(_)) => false, //no change
-            };
-
-            if changed {
-                let blob = parent_tree
-                    .get_path(self.get_version_file())?
-                    .to_object(repo)?
-                    .peel_to_blob()?;
-                let raw = std::str::from_utf8(blob.content())?;
-                let changed_version = self.parse_version_file(raw)?;
-                let current_version = self.get_version();
-                if changed_version < current_version {
-                    return anyhow::Ok(Some(oid));
-                }
-            }
-        }
-        Err(git2::Error::from_str("No commit found that changes project's version").into())
-    }
     fn parse_version_file(&self, unparsed_str: &str) -> anyhow::Result<SemVer>;
     fn get_extra_files(&self, config: &Config) -> anyhow::Result<Vec<PathBuf>>;
     fn get_changelog(&self) -> &Path {
@@ -146,33 +90,35 @@ impl Default for Patterns {
     }
 }
 
-// enum CommitKind {
-//     Release,
+trait HistoryItem {
+    fn message(&self) -> String;
+    fn version(&self) -> SemVer;
+}
 
-// }
+enum ChangeLogEntry {
+    BumpVersion(SemVer),
+    InitialVersion(SemVer),
+    Entry(String),
+}
 
 pub fn repo_has_commits(repo: &Repository) -> bool {
     repo.head().ok().and_then(|h| h.target()).is_some()
 }
 
-fn parse_commit_message(commit: &Commit, config: &Config) -> SemVerBump {
-    if let Some(message) = commit.message() {
-        let message = message.trim();
-        if config.patterns.major.iter().any(|r| r.is_match(message)) {
-            SemVerBump::Major
-        } else if config.patterns.minor.iter().any(|r| r.is_match(message)) {
-            SemVerBump::Minor
-        } else if config.patterns.patch.iter().any(|r| r.is_match(message)) {
-            SemVerBump::Patch
-        } else {
-            SemVerBump::None
-        }
+fn parse_commit_message<T: HistoryItem>(commit: &T, config: &Config) -> SemVerBump {
+    let message = commit.message();
+    if config.patterns.major.iter().any(|r| r.is_match(&message)) {
+        SemVerBump::Major
+    } else if config.patterns.minor.iter().any(|r| r.is_match(&message)) {
+        SemVerBump::Minor
+    } else if config.patterns.patch.iter().any(|r| r.is_match(&message)) {
+        SemVerBump::Patch
     } else {
         SemVerBump::None
     }
 }
 
-fn get_changelog_message(commit: &Commit, config: &Config) -> Option<String> {
+fn get_changelog_message(commit: &CommitWrapper, config: &Config) -> Option<String> {
     let mut patterns = config
         .patterns
         .major
@@ -180,21 +126,13 @@ fn get_changelog_message(commit: &Commit, config: &Config) -> Option<String> {
         .chain(&config.patterns.minor)
         .chain(&config.patterns.patch);
 
-    let message = commit.message()?.split("\n").next()?;
+    let message = commit.message();
+    let message = message.split("\n").next()?;
 
     if patterns.any(|r| r.is_match(message)) {
         Some(message.to_string())
     } else {
         None
-    }
-}
-
-fn is_clog_bump(commit: &Commit) -> bool {
-    if let Some(msg) = commit.message() {
-        msg.lines()
-            .any(|line| line.trim_start().starts_with(CLOG_TRAILER))
-    } else {
-        false
     }
 }
 
@@ -207,51 +145,39 @@ pub fn repo_is_clean(repo: &Repository) -> anyhow::Result<bool> {
     Ok(statuses.is_empty())
 }
 
-fn get_latest_release(repo: &Repository, project: &dyn Project) -> anyhow::Result<Option<Oid>> {
-    match project.get_latest_release(repo)? {
-        Some(oid) => Ok(Some(oid)),
-        None => get_prev_clog_bump(repo),
-    }
-}
+fn iterate_to_last_version<T>(history: T) -> impl Iterator<Item = CommitWrapper>
+where
+    T: Iterator<Item = CommitWrapper>,
+{
+    history.scan(None, |head_version, commit| {
+        let v = commit.version();
 
-fn calculate_bump(
-    repo: &Repository,
-    project: &dyn Project,
-    config: &Config,
-) -> anyhow::Result<SemVerBump> {
-    let since_oid = get_latest_release(repo, project)?;
-    let upto_oid = get_head(repo).unwrap();
-    let mut revwalk = repo.revwalk()?;
-    revwalk.set_sorting(Sort::TOPOLOGICAL)?;
-    revwalk.push(upto_oid)?;
-
-    if let Some(since) = since_oid {
-        revwalk.hide(since)?;
-    }
-
-    let mut bump = SemVerBump::None;
-    for oid_result in revwalk {
-        let oid = oid_result?;
-        let commit = repo.find_commit(oid)?;
-        let bump_kind = parse_commit_message(&commit, config);
-        bump = std::cmp::max(bump, bump_kind);
-    }
-    Ok(bump)
-}
-
-fn get_prev_clog_bump(repo: &Repository) -> anyhow::Result<Option<Oid>> {
-    let upto_oid = get_head(repo).unwrap();
-    let mut revwalk = repo.revwalk()?;
-    revwalk.set_sorting(Sort::TOPOLOGICAL)?;
-    revwalk.push(upto_oid)?;
-
-    for oid in revwalk.flatten() {
-        let commit = repo.find_commit(oid)?;
-        if is_clog_bump(&commit) {
-            return Ok(Some(commit.id()));
+        match head_version {
+            None => {
+                *head_version = Some(v);
+                Some(commit)
+            }
+            Some(hv) if *hv == v => Some(commit),
+            _ => None,
         }
+    })
+}
+
+pub fn get_next_version<T: Iterator<Item = CommitWrapper>>(
+    history: T,
+    config: &Config,
+) -> Option<SemVer> {
+    let commits: Vec<_> = iterate_to_last_version(history).collect();
+
+    let version = commits.first()?.version();
+    let bump = commits
+        .iter()
+        .map(|c| parse_commit_message(c, config))
+        .max()?;
+    if bump == SemVerBump::None {
+        return None;
     }
-    Ok(None)
+    Some(version.bump(bump))
 }
 
 pub fn detect_project(config: &Config) -> anyhow::Result<Box<dyn Project>> {
@@ -270,19 +196,22 @@ pub fn make_bump_commit(
     project: &mut dyn Project,
     config: &Config,
 ) -> anyhow::Result<()> {
-    changelog::prepare_changelog(repo, project, config).unwrap();
+    let history: Vec<CommitWrapper> = GitHistory::new(project, repo).collect();
 
-    let bump = calculate_bump(repo, project, config).unwrap();
-    if bump == SemVerBump::None {
-        return Ok(());
-    }
+    changelog::prepare_changelog(history.clone().into_iter(), project, config).unwrap();
+
+    let next_version = match get_next_version(history.into_iter(), config) {
+        Some(v) => v,
+        None => return Ok(()),
+    };
+
     let message = format!(
         "chore: bump version {} -> {}\n\n{}",
         project.get_version(),
-        project.get_version().bump(bump),
+        next_version,
         CLOG_TRAILER
     );
-    project.bump(bump);
+    project.set_version(next_version);
     project.write()?;
     // get your user?
     let sig = match repo.signature() {
@@ -366,72 +295,6 @@ pub fn make_initial_stable_commit(
     };
 
     Ok(commit_id)
-}
-
-fn get_head(repo: &Repository) -> Option<Oid> {
-    repo.head().ok().and_then(|h| h.target())
-}
-
-pub fn get_next_version(
-    repo: &Repository,
-    project: &dyn Project,
-    config: &Config,
-) -> anyhow::Result<SemVer> {
-    let bump = calculate_bump(repo, project, config)?;
-    Ok(project.get_version().bump(bump))
-}
-
-fn is_version_bump(
-    commit: &Commit,
-    repo: &Repository,
-    project: &dyn Project,
-) -> anyhow::Result<Option<SemVer>> {
-    if commit.parent_count() == 0 {
-        return Ok(None);
-    }
-
-    let parent = commit.parent(0)?;
-
-    let prev = version_at_commit(&parent, repo, project)?;
-    let curr = version_at_commit(commit, repo, project)?;
-
-    if prev != curr {
-        Ok(Some(curr))
-    } else {
-        Ok(None)
-    }
-}
-
-fn version_at_commit(
-    commit: &Commit,
-    repo: &Repository,
-    project: &dyn Project,
-) -> anyhow::Result<SemVer> {
-    let tree = commit.tree()?;
-    let tree_entry = tree.get_path(project.get_version_file())?;
-    let blob = tree_entry.to_object(repo)?.peel_to_blob()?;
-    let text = std::str::from_utf8(blob.content())?.to_string();
-    project.parse_version_file(&text)
-}
-
-fn find_first_version_of_project(
-    repo: &Repository,
-    project: &mut dyn Project,
-) -> anyhow::Result<Option<SemVer>> {
-    let upto_oid = get_head(repo).unwrap();
-    let mut revwalk = repo.revwalk()?;
-    revwalk.set_sorting(Sort::TOPOLOGICAL)?;
-    revwalk.push(upto_oid)?;
-    let mut version = None;
-
-    for oid_result in revwalk {
-        let oid = oid_result?;
-        let commit = repo.find_commit(oid)?;
-        if let Ok(v) = version_at_commit(&commit, repo, project) {
-            version = Some(v);
-        }
-    }
-    Ok(version)
 }
 
 #[cfg(test)]

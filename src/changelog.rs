@@ -1,56 +1,39 @@
 use std::{fs, io::Write};
 
-use git2::{Repository, Sort};
-
 use crate::{
-    find_first_version_of_project, get_changelog_message, get_head, get_latest_release,
-    get_next_version, is_version_bump, Config, Project,
+    get_changelog_message, get_next_version, git::CommitWrapper, iterate_to_last_version,
+    semver::SemVer, ChangeLogEntry, Config, HistoryItem, Project,
 };
 
-
-pub fn prepare_changelog(
-    repo: &Repository,
-    project: &mut dyn Project,
+pub fn prepare_changelog<T: Iterator<Item = CommitWrapper> + Clone>(
+    history: T,
+    project: &dyn Project,
     config: &Config,
 ) -> anyhow::Result<()> {
-    let mut path = repo.commondir().parent().unwrap().to_path_buf();
-    path.push(project.get_changelog());
-
+    let path = project.get_dir().join(project.get_changelog());
     if !path.exists() {
-        generate_entire_changelog(repo, project, config)
+        generate_entire_changelog(history, project, config)
     } else {
-        append_changelog(repo, project, config)
+        append_changelog(history, project, config)
     }
 }
 
-fn append_changelog(
-    repo: &Repository,
-    project: &mut dyn Project,
+fn append_changelog<T: Iterator<Item = CommitWrapper> + Clone>(
+    history: T,
+    project: &dyn Project,
     config: &Config,
 ) -> anyhow::Result<()> {
-    let mut path = repo.commondir().parent().unwrap().to_path_buf();
-    path.push(project.get_changelog());
-    let mut changelog_entries = vec![render::ChangeLogEntry::BumpVersion(get_next_version(
-        repo, project, config,
-    )?)];
+    let path = project.get_dir().join(project.get_changelog());
 
-    let since_oid = get_latest_release(repo, project)?;
-    let upto_oid = get_head(repo).unwrap();
-    let mut revwalk = repo.revwalk()?;
-    revwalk.set_sorting(Sort::TOPOLOGICAL)?;
-    revwalk.push(upto_oid)?;
+    let next_version = match get_next_version(history.clone(), config) {
+        Some(v) => v,
+        None => return Ok(()),
+    };
 
-    if let Some(since) = since_oid {
-        revwalk.hide(since)?;
-    }
+    let mut changelog_entries = vec![ChangeLogEntry::BumpVersion(next_version)];
 
-    for oid_result in revwalk {
-        let oid = oid_result?;
-        let commit = repo.find_commit(oid)?;
-        if let Some(s) = get_changelog_message(&commit, config) {
-            changelog_entries.push(render::ChangeLogEntry::Entry(s));
-        }
-    }
+    changelog_entries
+        .extend(iterate_to_last_version(history).map(|c| ChangeLogEntry::Entry(c.message())));
 
     let original = fs::read_to_string(&path)?;
     let changelog = render::prepend_render_changelog(&changelog_entries, &original, config);
@@ -59,44 +42,35 @@ fn append_changelog(
     Ok(())
 }
 
-fn generate_entire_changelog(
-    repo: &Repository,
-    project: &mut dyn Project,
+fn generate_entire_changelog<T: Iterator<Item = CommitWrapper> + Clone>(
+    history: T,
+    project: &dyn Project,
     config: &Config,
 ) -> anyhow::Result<()> {
-    let mut changelog_entries = vec![render::ChangeLogEntry::BumpVersion(get_next_version(
-        repo, project, config,
-    )?)];
+    // let history = GitHistory::new(project, repo).into_iter();
+    let mut next_version = match get_next_version(history.clone(), config) {
+        Some(v) => v,
+        None => return Ok(()),
+    };
+    let mut changelog_entries = vec![];
 
-    let upto_oid = get_head(repo).unwrap();
-    let mut revwalk = repo.revwalk()?;
-    revwalk.set_sorting(Sort::TOPOLOGICAL)?;
-    revwalk.push(upto_oid)?;
-
-    for oid_result in revwalk {
-        let oid = oid_result?;
-        let commit = repo.find_commit(oid)?;
-        if let Some(version) = is_version_bump(&commit, repo, project)? {
-            changelog_entries.push(render::ChangeLogEntry::BumpVersion(version));
+    for commit in history.clone() {
+        if commit.version() != next_version {
+            changelog_entries.push(ChangeLogEntry::BumpVersion(next_version));
+            next_version = commit.version();
         }
-
         if let Some(s) = get_changelog_message(&commit, config) {
-            changelog_entries.push(render::ChangeLogEntry::Entry(s));
+            changelog_entries.push(ChangeLogEntry::Entry(s));
         }
     }
 
-    if let Some(version) = find_first_version_of_project(repo, project)? {
-        changelog_entries.push(render::ChangeLogEntry::InitialVersion(version));
+    if let Some(version) = find_first_version_of_project(history.clone())? {
+        changelog_entries.push(ChangeLogEntry::InitialVersion(version));
     }
 
     let changelog = render::render_changelog(&changelog_entries, config);
 
-    let mut path = repo
-        .commondir()
-        .parent()
-        .expect(".git should be in a dir")
-        .to_path_buf();
-    path.push(project.get_changelog());
+    let path = project.get_dir().join(project.get_changelog());
 
     let mut file = fs::File::create(path)?;
 
@@ -105,14 +79,15 @@ fn generate_entire_changelog(
     Ok(())
 }
 
-mod render {
-    use crate::{Config, semver::SemVer};
+fn find_first_version_of_project<T: Iterator<Item = CommitWrapper>>(
+    history: T,
+) -> anyhow::Result<Option<SemVer>> {
+    let version = history.map(|c| c.version()).min();
+    Ok(version)
+}
 
-    pub enum ChangeLogEntry {
-        BumpVersion(SemVer),
-        InitialVersion(SemVer),
-        Entry(String),
-    }
+mod render {
+    use crate::{ChangeLogEntry, Config};
 
     pub fn render_changelog(changelog_entries: &[ChangeLogEntry], _config: &Config) -> String {
         let mut changelog = String::new();
