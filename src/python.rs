@@ -7,7 +7,7 @@ use anyhow::anyhow;
 use toml::Table;
 use toml_edit::DocumentMut;
 
-use crate::{Config, Project, SemVer, SemVerBump};
+use crate::{Config, Project, SemVer};
 
 pub struct PyProject {
     version: SemVer,
@@ -52,8 +52,8 @@ impl Project for PyProject {
         self.version.clone()
     }
 
-    fn bump(&mut self, bump: SemVerBump) {
-        self.version = self.version.bump(bump);
+    fn set_version(&mut self, version: SemVer) {
+        self.version = version;
     }
 
     fn write(&self) -> anyhow::Result<()> {

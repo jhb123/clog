@@ -136,18 +136,11 @@ pub fn init_python_repo<P: AsRef<std::path::Path>>(
 ) -> anyhow::Result<Repository> {
     let mut opts = RepositoryInitOptions::new();
     opts.bare(false)
-        .no_reinit(true)
         .mkpath(false)
         .initial_head("main")
         .external_template(false);
 
     let repo = Repository::init_opts(path, &opts)?;
-
-    let mut cfg = repo.config()?;
-    cfg.set_bool("core.fsync", false)?;
-    cfg.set_bool("core.fsyncObjectFiles", false)?;
-    cfg.set_bool("core.fsyncRefFiles", false)?;
-    cfg.set_bool("core.logAllRefUpdates", false)?;
 
     // Only commit once
     if !repo_has_commits(&repo) {

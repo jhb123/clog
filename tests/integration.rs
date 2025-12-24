@@ -29,14 +29,6 @@ fn run_clog_stable_release(dir: &TempDir) {
         .stderr("");
 }
 
-fn assert_changelog(repo: &TempDir, bump: SemVerBump) {
-    let changelog_path = repo.join(Path::new("Changelog.md"));
-    if bump != SemVerBump::None {
-        let changelog = fs::read_to_string(changelog_path).unwrap();
-        insta::assert_snapshot!(changelog)
-    }
-}
-
 #[fixture]
 #[once]
 fn cached_pre_stable_repo_dir() -> TempDir {
@@ -115,7 +107,6 @@ fn test_bump_commit_version_file(#[case] repo_dir: TempDir) {
     let v2 = get_python_pyroject_version(&repo_dir).unwrap();
     assert_eq!(v2, SemVer::new(0, 2, 0, None, None));
     assert_clog_commit_version(&repo_dir, SemVer::parse("0.2.0").unwrap());
-    assert_changelog(&repo_dir, SemVerBump::Minor);
 }
 
 #[rstest]
@@ -128,7 +119,6 @@ fn test_version_1_version_file(#[case] repo_dir: TempDir) {
     let v2 = get_python_pyroject_version(&repo_dir).unwrap();
     assert_eq!(v2, SemVer::new(1, 0, 0, None, None));
     assert_clog_commit_version(&repo_dir, SemVer::parse("1.0.0").unwrap());
-    assert_changelog(&repo_dir, SemVerBump::Major);
 }
 
 #[rstest]
@@ -171,9 +161,7 @@ fn test_semver_bump_prestable(
     let v2 = get_python_pyroject_version(&pre_stable_repo_dir).unwrap();
     assert_eq!(v2, v1.bump(msg1.bump));
     assert_repo_is_clean(&repo);
-    assert_changelog(&pre_stable_repo_dir, msg1.bump);
 }
-
 
 #[rstest]
 fn test_two_semver_bumps_prestable(
@@ -194,7 +182,6 @@ fn test_two_semver_bumps_prestable(
     if msg1.bump != SemVerBump::None {
         assert_clog_commit_version(&pre_stable_repo_dir, v1.bump(msg1.bump))
     }
-    assert_changelog(&pre_stable_repo_dir, msg1.bump);
 
     empty_commit(&repo, msg2.msg).unwrap();
     run_clog(&pre_stable_repo_dir);
@@ -206,7 +193,6 @@ fn test_two_semver_bumps_prestable(
     if msg2.bump != SemVerBump::None {
         assert_clog_commit_version(&pre_stable_repo_dir, v2.bump(msg2.bump))
     }
-    assert_changelog(&pre_stable_repo_dir, msg2.bump);
 }
 
 #[rstest]
@@ -226,5 +212,13 @@ fn test_semver_bump_stable(
     if msg1.bump != SemVerBump::None {
         assert_clog_commit_version(&stable_repo_dir, v1.bump(msg1.bump))
     }
-    assert_changelog(&stable_repo_dir, msg1.bump);
+}
+
+#[rstest]
+fn changelog(pre_stable_branches_repo_dir: TempDir) {
+    let v1 = get_python_pyroject_version(&pre_stable_branches_repo_dir).unwrap();
+    run_clog(&pre_stable_branches_repo_dir);
+    let v2 = get_python_pyroject_version(&pre_stable_branches_repo_dir).unwrap();
+    let changelog = fs::read_to_string(pre_stable_branches_repo_dir.join("Changelog.md")).unwrap();
+    assert_eq!(changelog,"# Version 0.2.0\nfix: bug in B\nfeat: add feature B\nfix!: bug in A\nfeat: add feature A\n# Version 0.1.0\nInitial Commit\n")
 }
