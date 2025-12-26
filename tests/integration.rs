@@ -21,12 +21,31 @@ fn run_clog(dir: &TempDir) {
 
 fn run_clog_stable_release(dir: &TempDir) {
     cargo_bin_cmd!(pkg_name!())
+        .arg("stable")
         .arg("--yes")
-        .arg("--stable")
         .current_dir(&dir)
         .assert()
         .success()
         .stderr("");
+}
+
+fn run_clog_redo(dir: &TempDir) {
+    cargo_bin_cmd!(pkg_name!())
+        .arg("redo")
+        .arg("--yes")
+        .current_dir(&dir)
+        .assert()
+        .success()
+        .stderr("");
+}
+
+fn run_clog_redo_fail(dir: &TempDir) {
+    cargo_bin_cmd!(pkg_name!())
+        .arg("redo")
+        .arg("--yes")
+        .current_dir(&dir)
+        .assert()
+        .failure();
 }
 
 #[fixture]
@@ -233,4 +252,29 @@ fn append_changelog(pre_stable_branches_repo_dir: TempDir) {
     run_clog(&pre_stable_branches_repo_dir);
     let changelog = fs::read_to_string(pre_stable_branches_repo_dir.join("Changelog.md")).unwrap();
     assert_eq!(changelog,"# Version 0.3.0\n- feat: test commit\n# Version 0.2.0\n- fix: bug in B\n- feat: add feature B\n- fix!: bug in A\n- feat: add feature A\n# Version 0.1.0\n- Initial Commit\n");
+}
+
+#[rstest]
+fn test_redo(stable_repo_dir: TempDir) {
+    let repo = Repository::open(&stable_repo_dir).unwrap();
+    let v1 = get_python_pyroject_version(&stable_repo_dir).unwrap();
+    assert_eq!(v1, SemVer::new(1, 0, 0, None, None));
+    empty_commit(&repo, "feat: feature 1").unwrap();
+    run_clog(&stable_repo_dir);
+    let v2 = get_python_pyroject_version(&stable_repo_dir).unwrap();
+    assert_repo_is_clean(&repo);
+    assert_eq!(v2, SemVer::new(1, 1, 0, None, None));
+    empty_commit(&repo, "feat!: feature B").unwrap();
+    run_clog_redo(&stable_repo_dir);
+    assert_repo_is_clean(&repo);
+    let v3 = get_python_pyroject_version(&stable_repo_dir).unwrap();
+    assert_eq!(v3, SemVer::new(2, 0, 0, None, None));
+}
+
+#[rstest]
+fn test_forbidden_redo(stable_repo_dir: TempDir) {
+    let v1 = get_python_pyroject_version(&stable_repo_dir).unwrap();
+    assert_eq!(v1, SemVer::new(1, 0, 0, None, None));
+    run_clog_redo_fail(&stable_repo_dir);
+    assert_eq!(v1, get_python_pyroject_version(&stable_repo_dir).unwrap());
 }

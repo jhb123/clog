@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use anyhow::{anyhow, Context, Error};
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use clog::{
     bump_project_version, detect_project, get_next_version, git::GitHistory, is_repo_ready,
     make_stable_release, semver::SemVer, Config,
@@ -12,13 +12,20 @@ use inquire::Confirm;
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Cli {
-    /// Declare stable and bump to v1.0.0
-    #[clap(short, long, default_value = "false")]
-    stable: bool,
+    #[command(subcommand)]
+    command: Option<Commands>,
 
     /// Skip confirmation prompts (automatically answer yes)
-    #[arg(short = 'y', long)]
+    #[arg(short = 'y', long, global = true)]
     yes: bool,
+}
+
+#[derive(Default, Subcommand)]
+enum Commands {
+    #[default]
+    Bump,
+    Redo,
+    Stable,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -32,10 +39,10 @@ fn main() -> anyhow::Result<()> {
         return Err(anyhow!("Repo is not in a clean state. Commit your changes"));
     }
 
-    if cli.stable {
-        major_version_one(&repo, &config, cli.yes)
-    } else {
-        bump_release(&repo, &config, cli.yes)
+    match cli.command.unwrap_or_default() {
+        Commands::Bump => bump_release(&repo, &config, cli.yes),
+        Commands::Redo => redo_release(&repo, &config, cli.yes),
+        Commands::Stable => major_version_one(&repo, &config, cli.yes),
     }
 }
 
@@ -108,6 +115,28 @@ fn major_version_one(repo: &Repository, config: &Config, auto_yes: bool) -> anyh
 
     if should_release {
         make_stable_release(repo, project.as_mut(), config)?;
+    }
+
+    Ok(())
+}
+
+fn redo_release(repo: &Repository, config: &Config, auto_yes: bool) -> anyhow::Result<()> {
+    let mut project = detect_project(config)?;
+
+    let should_redo = if auto_yes {
+        println!("Redoing last release");
+        true
+    } else {
+        Confirm::new("Would you like to make the redo the most recent release of this project?")
+            .with_help_message(
+                "This action will perform a rebase on your project and recalculate the the release."
+            )
+            .with_default(false)
+            .prompt()?
+    };
+
+    if should_redo {
+        clog::redo_release(repo, project.as_mut(), config)?;
     }
 
     Ok(())
