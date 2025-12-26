@@ -1,3 +1,6 @@
+# Version 0.4.1
+- fix: appended changelog generation
+- fix: formatting lists in markdown changelog
 # Version 0.4.0
 - feat: add changelog prototype
 # Version 0.3.0
