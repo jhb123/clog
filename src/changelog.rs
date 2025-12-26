@@ -54,8 +54,11 @@ fn get_newest_changelog_items<T: Iterator<Item = CommitWrapper> + Clone>(
         None => return vec![],
     };
     let mut changelog_entries = vec![ChangeLogEntry::BumpVersion(next_version)];
-    changelog_entries
-        .extend(iterate_to_last_version(history).map(|c| ChangeLogEntry::Entry(c.message())));
+    changelog_entries.extend(
+        iterate_to_last_version(history)
+            .filter_map(|c| get_changelog_message(&c, config))
+            .map(ChangeLogEntry::Entry),
+    );
     changelog_entries
 }
 

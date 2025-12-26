@@ -1,4 +1,4 @@
-use std::{fs, path::Path};
+use std::fs;
 
 use assert_cmd::{cargo::cargo_bin_cmd, pkg_name};
 use assert_fs::fixture::TempDir;
@@ -215,8 +215,22 @@ fn test_semver_bump_stable(
 }
 
 #[rstest]
-fn changelog(pre_stable_branches_repo_dir: TempDir) {
+fn init_changelog(pre_stable_branches_repo_dir: TempDir) {
     run_clog(&pre_stable_branches_repo_dir);
     let changelog = fs::read_to_string(pre_stable_branches_repo_dir.join("Changelog.md")).unwrap();
     assert_eq!(changelog,"# Version 0.2.0\n- fix: bug in B\n- feat: add feature B\n- fix!: bug in A\n- feat: add feature A\n# Version 0.1.0\n- Initial Commit\n")
+}
+
+#[rstest]
+fn append_changelog(pre_stable_branches_repo_dir: TempDir) {
+    let repo = Repository::open(&pre_stable_branches_repo_dir).unwrap();
+    run_clog(&pre_stable_branches_repo_dir);
+    let changelog = fs::read_to_string(pre_stable_branches_repo_dir.join("Changelog.md")).unwrap();
+    assert_eq!(changelog,"# Version 0.2.0\n- fix: bug in B\n- feat: add feature B\n- fix!: bug in A\n- feat: add feature A\n# Version 0.1.0\n- Initial Commit\n");
+    assert_repo_is_clean(&repo);
+    empty_commit(&repo, "feat: test commit\nthis is a test\ntrailer").unwrap();
+    empty_commit(&repo, "foobar").unwrap();
+    run_clog(&pre_stable_branches_repo_dir);
+    let changelog = fs::read_to_string(pre_stable_branches_repo_dir.join("Changelog.md")).unwrap();
+    assert_eq!(changelog,"# Version 0.3.0\n- feat: test commit\n# Version 0.2.0\n- fix: bug in B\n- feat: add feature B\n- fix!: bug in A\n- feat: add feature A\n# Version 0.1.0\n- Initial Commit\n");
 }
