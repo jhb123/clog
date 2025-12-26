@@ -56,7 +56,7 @@ impl Project for PyProject {
         self.version = version;
     }
 
-    fn write(&self) -> anyhow::Result<()> {
+    fn update_project_file(&self) -> anyhow::Result<()> {
         let content = fs::read_to_string(&self.path)?;
         let mut doc = content.parse::<DocumentMut>()?;
         doc["project"]["version"] = toml_edit::value(self.version.to_string());
