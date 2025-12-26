@@ -218,5 +218,5 @@ fn test_semver_bump_stable(
 fn changelog(pre_stable_branches_repo_dir: TempDir) {
     run_clog(&pre_stable_branches_repo_dir);
     let changelog = fs::read_to_string(pre_stable_branches_repo_dir.join("Changelog.md")).unwrap();
-    assert_eq!(changelog,"# Version 0.2.0\nfix: bug in B\nfeat: add feature B\nfix!: bug in A\nfeat: add feature A\n# Version 0.1.0\nInitial Commit\n")
+    assert_eq!(changelog,"# Version 0.2.0\n- fix: bug in B\n- feat: add feature B\n- fix!: bug in A\n- feat: add feature A\n# Version 0.1.0\n- Initial Commit\n")
 }

@@ -135,10 +135,10 @@ mod render {
                     changelog.push_str(&format!("# Version {}", sem_ver));
                 }
                 ChangeLogEntry::InitialVersion(sem_ver) => {
-                    changelog.push_str(&format!("# Version {}\nInitial Commit", sem_ver));
+                    changelog.push_str(&format!("# Version {}\n- Initial Commit", sem_ver));
                 }
                 ChangeLogEntry::Entry(msg) => {
-                    changelog.push_str(msg);
+                    changelog.push_str(&format!("- {}", msg));
                 }
             }
             changelog.push('\n');
