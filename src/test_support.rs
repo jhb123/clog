@@ -1,15 +1,14 @@
 use anyhow::Ok;
 use clap::ValueEnum;
 use git2::{build::CheckoutBuilder, Commit, Oid, Repository, RepositoryInitOptions, Signature};
-use inquire::Confirm;
 use names::{Generator, Name};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::{fs, path::Path, process::exit};
 
 use crate::{
+    git::repo_has_commits,
     python::PyProject,
-    repo_has_commits,
     semver::{SemVer, SemVerBump},
     Project,
 };
@@ -114,19 +113,6 @@ pub fn branches_repo<P: AsRef<std::path::Path>, F: Fn(&P) -> anyhow::Result<Repo
         &[&master_commit, &feature_commit_2],
     )?;
 
-    Ok(())
-}
-
-fn check_repo_has_commits(repo: &Repository) -> Result<(), anyhow::Error> {
-    if repo_has_commits(repo) {
-        let ans =
-            Confirm::new("This repo is not empty. Do you want to add new commits to this repo?")
-                .with_default(false)
-                .prompt()?;
-        if !ans {
-            return Ok(());
-        }
-    };
     Ok(())
 }
 

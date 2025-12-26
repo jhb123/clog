@@ -9,21 +9,21 @@ use std::{
     vec,
 };
 
-use git2::{Oid, Repository, Signature, StatusOptions};
+use git2::Repository;
 use once_cell::sync::Lazy;
 use regex::Regex;
 
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
 
+pub use crate::git::is_repo_ready;
+
 use crate::{
-    git::{CommitWrapper, GitHistory},
+    git::{create_clog_commit, CommitWrapper, GitHistory},
     python::PyProject,
     rust::CargoProject,
     semver::{SemVer, SemVerBump},
 };
-
-static CLOG_TRAILER: &str = "Bumped-by: clog";
 
 static DEFAULT_PATTERNS: Lazy<Patterns> = Lazy::new(|| Patterns {
     major: vec![Regex::new(r"^.*!:").unwrap()],
@@ -38,7 +38,7 @@ pub trait Project {
         Self: Sized;
     fn get_dir(&self) -> &Path;
     fn set_version(&mut self, bump: SemVer);
-    fn write(&self) -> anyhow::Result<()>;
+    fn update_project_file(&self) -> anyhow::Result<()>;
     fn get_version_file(&self) -> &Path; // needs to be dyn compatible
     fn set_initial_release(&mut self) -> anyhow::Result<()>;
     fn parse_version_file(&self, unparsed_str: &str) -> anyhow::Result<SemVer>;
@@ -95,54 +95,35 @@ trait HistoryItem {
     fn version(&self) -> SemVer;
 }
 
-enum ChangeLogEntry {
-    BumpVersion(SemVer),
-    InitialVersion(SemVer),
-    Entry(String),
+/// Create a commit which updates the changelog and bumps the version
+pub fn bump_project_version(
+    repo: &Repository,
+    project: &mut dyn Project,
+    config: &Config,
+) -> anyhow::Result<()> {
+    let history: Vec<CommitWrapper> = GitHistory::new(project, repo).collect();
+
+    changelog::prepare_changelog(history.clone().into_iter(), project, config).unwrap();
+
+    let next_version = match get_next_version(history.into_iter(), config) {
+        Some(v) => v,
+        None => return Ok(()),
+    };
+
+    create_clog_commit(repo, project, config, next_version)
 }
 
-pub fn repo_has_commits(repo: &Repository) -> bool {
-    repo.head().ok().and_then(|h| h.target()).is_some()
-}
-
-fn parse_commit_message<T: HistoryItem>(commit: &T, config: &Config) -> SemVerBump {
-    let message = commit.message();
-    if config.patterns.major.iter().any(|r| r.is_match(&message)) {
-        SemVerBump::Major
-    } else if config.patterns.minor.iter().any(|r| r.is_match(&message)) {
-        SemVerBump::Minor
-    } else if config.patterns.patch.iter().any(|r| r.is_match(&message)) {
-        SemVerBump::Patch
-    } else {
-        SemVerBump::None
-    }
-}
-
-fn get_changelog_message(commit: &CommitWrapper, config: &Config) -> Option<String> {
-    let mut patterns = config
-        .patterns
-        .major
-        .iter()
-        .chain(&config.patterns.minor)
-        .chain(&config.patterns.patch);
-
-    let message = commit.message();
-    let message = message.split("\n").next()?;
-
-    if patterns.any(|r| r.is_match(message)) {
-        Some(message.to_string())
-    } else {
-        None
-    }
-}
-
-pub fn repo_is_clean(repo: &Repository) -> anyhow::Result<bool> {
-    let mut opts = StatusOptions::new();
-    opts.include_untracked(true)
-        .recurse_untracked_dirs(true)
-        .include_ignored(false);
-    let statuses = repo.statuses(Some(&mut opts))?;
-    Ok(statuses.is_empty())
+/// Create the initial release commit on the current branch
+pub fn make_stable_release(
+    repo: &Repository,
+    project: &mut dyn Project,
+    config: &Config,
+) -> anyhow::Result<()> {
+    let history: Vec<CommitWrapper> = GitHistory::new(project, repo).collect();
+    changelog::prepare_changelog(history.clone().into_iter(), project, config).unwrap();
+    project.set_initial_release()?;
+    project.update_project_file()?;
+    create_clog_commit(repo, project, config, SemVer::version_1_0_0())
 }
 
 fn iterate_to_last_version<T>(history: T) -> impl Iterator<Item = CommitWrapper>
@@ -190,111 +171,17 @@ pub fn detect_project(config: &Config) -> anyhow::Result<Box<dyn Project>> {
     }
 }
 
-/// Create a bump commit on the current branch
-pub fn make_bump_commit(
-    repo: &Repository,
-    project: &mut dyn Project,
-    config: &Config,
-) -> anyhow::Result<()> {
-    let history: Vec<CommitWrapper> = GitHistory::new(project, repo).collect();
-
-    changelog::prepare_changelog(history.clone().into_iter(), project, config).unwrap();
-
-    let next_version = match get_next_version(history.into_iter(), config) {
-        Some(v) => v,
-        None => return Ok(()),
-    };
-
-    let message = format!(
-        "chore: bump version {} -> {}\n\n{}",
-        project.get_version(),
-        next_version,
-        CLOG_TRAILER
-    );
-    project.set_version(next_version);
-    project.write()?;
-    // get your user?
-    let sig = match repo.signature() {
-        Ok(s) => s,
-        Err(_) => Signature::now(&config.name, &config.email)?,
-    };
-    let tree_id = {
-        let mut index = repo.index().unwrap();
-        let version_file = project.get_version_file();
-        index.add_path(version_file)?;
-
-        let change_log = project.get_changelog();
-        index.add_path(change_log)?;
-
-        for file in project.get_extra_files(config)? {
-            index.add_path(&file)?
-        }
-        index.write()?;
-        index.write_tree()?
-    };
-
-    let tree = repo.find_tree(tree_id)?;
-
-    let parent_commit = repo
-        .head()
-        .ok()
-        .and_then(|h| h.target())
-        .and_then(|oid| repo.find_commit(oid).ok());
-
-    if let Some(parent) = parent_commit {
-        repo.commit(Some("HEAD"), &sig, &sig, &message, &tree, &[&parent])?;
+fn parse_commit_message<T: HistoryItem>(commit: &T, config: &Config) -> SemVerBump {
+    let message = commit.message();
+    if config.patterns.major.iter().any(|r| r.is_match(&message)) {
+        SemVerBump::Major
+    } else if config.patterns.minor.iter().any(|r| r.is_match(&message)) {
+        SemVerBump::Minor
+    } else if config.patterns.patch.iter().any(|r| r.is_match(&message)) {
+        SemVerBump::Patch
     } else {
-        repo.commit(Some("HEAD"), &sig, &sig, &message, &tree, &[])?;
-    };
-
-    Ok(())
-}
-
-/// Create the initial release commit on the current branch
-pub fn make_initial_stable_commit(
-    repo: &Repository,
-    project: &mut dyn Project,
-    config: &Config,
-) -> anyhow::Result<Oid> {
-    let message = format!(
-        "chore: bump version {} -> {}\n\n{}",
-        project.get_version(),
-        SemVer::version_1_0_0(),
-        CLOG_TRAILER
-    );
-
-    project.set_initial_release()?;
-    project.write()?;
-
-    // get your user?
-    let sig = match repo.signature() {
-        Ok(s) => s,
-        Err(_) => Signature::now(&config.name, &config.email)?,
-    };
-
-    let tree_id = {
-        let mut index = repo.index()?;
-        let rel_path = project.get_version_file();
-        index.add_path(rel_path)?;
-        index.write()?;
-        index.write_tree()?
-    };
-
-    let tree = repo.find_tree(tree_id)?;
-
-    let parent_commit = repo
-        .head()
-        .ok()
-        .and_then(|h| h.target())
-        .and_then(|oid| repo.find_commit(oid).ok());
-
-    let commit_id = if let Some(parent) = parent_commit {
-        repo.commit(Some("HEAD"), &sig, &sig, &message, &tree, &[&parent])?
-    } else {
-        repo.commit(Some("HEAD"), &sig, &sig, &message, &tree, &[])?
-    };
-
-    Ok(commit_id)
+        SemVerBump::None
+    }
 }
 
 #[cfg(test)]
@@ -378,13 +265,13 @@ mod test {
     fn test_bump_helper(dir: &TempDir, repo: &Repository) {
         let config = Config::new(dir);
         let mut project = detect_project(&config).unwrap();
-        make_bump_commit(repo, project.as_mut(), &config).unwrap();
+        bump_project_version(repo, project.as_mut(), &config).unwrap();
     }
 
     fn test_initial_stable_helper(dir: &TempDir, repo: &Repository) {
         let config = Config::new(dir);
         let mut project = detect_project(&config).unwrap();
-        make_initial_stable_commit(repo, project.as_mut(), &config).unwrap();
+        make_stable_release(repo, project.as_mut(), &config).unwrap();
     }
 
     #[rstest]
@@ -524,4 +411,7 @@ mod test {
             assert_repo_is_clean(&repo);
         }
     }
+
+    #[rstest]
+    fn test_next_version() {}
 }

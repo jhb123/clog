@@ -3,8 +3,8 @@ use std::path::Path;
 use anyhow::{anyhow, Context, Error};
 use clap::Parser;
 use clog::{
-    detect_project, get_next_version, git::GitHistory, make_bump_commit,
-    make_initial_stable_commit, repo_has_commits, repo_is_clean, semver::SemVer, Config,
+    bump_project_version, detect_project, get_next_version, git::GitHistory, is_repo_ready,
+    make_stable_release, semver::SemVer, Config,
 };
 use git2::Repository;
 use inquire::Confirm;
@@ -28,11 +28,7 @@ fn main() -> anyhow::Result<()> {
     let repo = Repository::open(current_dir)
         .with_context(|| format!("Failed to open repo at {:?}", current_dir.canonicalize()))?;
 
-    if !repo_has_commits(&repo) {
-        return Err(anyhow!("Repo has no commits"));
-    }
-
-    if !repo_is_clean(&repo)? {
+    if !is_repo_ready(&repo) {
         return Err(anyhow!("Repo is not in a clean state. Commit your changes"));
     }
 
@@ -72,7 +68,7 @@ fn bump_release(repo: &Repository, config: &Config, auto_yes: bool) -> anyhow::R
         };
 
         if should_bump {
-            make_bump_commit(repo, project.as_mut(), config)?;
+            bump_project_version(repo, project.as_mut(), config)?;
         }
     } else {
         println!("No release required")
@@ -111,7 +107,7 @@ fn major_version_one(repo: &Repository, config: &Config, auto_yes: bool) -> anyh
     };
 
     if should_release {
-        make_initial_stable_commit(repo, project.as_mut(), config)?;
+        make_stable_release(repo, project.as_mut(), config)?;
     }
 
     Ok(())

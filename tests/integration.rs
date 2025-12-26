@@ -216,9 +216,7 @@ fn test_semver_bump_stable(
 
 #[rstest]
 fn changelog(pre_stable_branches_repo_dir: TempDir) {
-    let v1 = get_python_pyroject_version(&pre_stable_branches_repo_dir).unwrap();
     run_clog(&pre_stable_branches_repo_dir);
-    let v2 = get_python_pyroject_version(&pre_stable_branches_repo_dir).unwrap();
     let changelog = fs::read_to_string(pre_stable_branches_repo_dir.join("Changelog.md")).unwrap();
     assert_eq!(changelog,"# Version 0.2.0\nfix: bug in B\nfeat: add feature B\nfix!: bug in A\nfeat: add feature A\n# Version 0.1.0\nInitial Commit\n")
 }

@@ -60,7 +60,7 @@ impl Project for CargoProject {
         self.version = version
     }
 
-    fn write(&self) -> anyhow::Result<()> {
+    fn update_project_file(&self) -> anyhow::Result<()> {
         let content = fs::read_to_string(&self.path)?;
         let mut doc = content.parse::<DocumentMut>()?;
         doc["package"]["version"] = toml_edit::value(self.version.to_string());
