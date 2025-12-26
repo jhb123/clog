@@ -1,6 +1,8 @@
-use git2::{Commit, Repository, Revwalk, Signature, Sort, StatusOptions};
+use std::os::macos::raw::stat;
 
-use crate::{semver::SemVer, Config, HistoryItem, Project};
+use git2::{Commit, Oid, Repository, Revwalk, Signature, Sort, StatusOptions};
+
+use crate::{Config, HistoryItem, Project, iterate_to_last_version, semver::SemVer};
 
 static CLOG_TRAILER: &str = "Bumped-by: clog";
 
@@ -40,13 +42,15 @@ impl<'repo> Iterator for GitHistory<'repo> {
 pub struct CommitWrapper {
     message: String,
     version: crate::semver::SemVer,
+    id: Oid,
 }
 
 impl CommitWrapper {
-    pub fn new(message: &str, version: SemVer) -> Self {
+    pub fn new(message: &str, version: SemVer, id: Oid) -> Self {
         Self {
             message: message.to_string(),
             version,
+            id,
         }
     }
 
@@ -69,8 +73,12 @@ impl CommitWrapper {
             .expect("All commits expected to have blob");
         let text = std::str::from_utf8(blob.content())?.to_string();
         let version = project.parse_version_file(&text)?;
-
-        Ok(Self { message, version })
+        let id = commit.id();
+        Ok(Self {
+            message,
+            version,
+            id,
+        })
     }
 }
 
@@ -132,6 +140,39 @@ pub fn create_clog_commit(
     } else {
         repo.commit(Some("HEAD"), &sig, &sig, &message, &tree, &[])?;
     };
+
+    Ok(())
+}
+
+pub fn remove_last_release_commit(repo: &Repository, history: GitHistory) -> anyhow::Result<()> {
+    let release_commit = match iterate_to_last_version(history).last()
+        .and_then(|c| Some(repo.find_commit(c.id).expect("Commit just obtained"))){
+        Some(c) => c,
+        None => return Ok(()),
+    };
+
+    let parent = repo.find_annotated_commit(release_commit.parent(0)?.id())?;
+
+    let mut rebase = repo.rebase(None, Some(&parent), None, None).expect("failed to rebase");
+    let sig = repo.signature()?;
+    
+    while let Some(op) = rebase.next() {
+        let op = op?;
+        let oid = op.id();
+
+        println!("{:?}",oid);
+        let statuses = repo.statuses(None).unwrap();
+        for s in &statuses {
+            println!("- {:?} {:?}",s.path(), s.status());
+        }
+        if oid == release_commit.id() {
+            println!("Skipped");
+            continue;
+        }
+        rebase.commit(None, &sig, None)?;
+        println!("next");
+    }
+    rebase.finish(Some(&sig))?;
 
     Ok(())
 }
