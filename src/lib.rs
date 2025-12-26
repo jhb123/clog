@@ -19,11 +19,52 @@ pub mod test_support;
 pub use crate::git::is_repo_ready;
 
 use crate::{
-    git::{create_clog_commit, CommitWrapper, GitHistory},
+    git::{create_clog_commit, remove_last_release_commit, CommitWrapper, GitHistory},
     python::PyProject,
     rust::CargoProject,
     semver::{SemVer, SemVerBump},
 };
+
+/// Create a commit which updates the changelog and bumps the version
+pub fn bump_project_version(
+    repo: &Repository,
+    project: &mut dyn Project,
+    config: &Config,
+) -> anyhow::Result<()> {
+    let history: Vec<CommitWrapper> = GitHistory::new(project, repo).collect();
+
+    changelog::prepare_changelog(history.clone().into_iter(), project, config).unwrap();
+
+    let next_version = match get_next_version(history.into_iter(), config) {
+        Some(v) => v,
+        None => return Ok(()),
+    };
+
+    create_clog_commit(repo, project, config, next_version)
+}
+
+/// Create the initial release commit on the current branch
+pub fn make_stable_release(
+    repo: &Repository,
+    project: &mut dyn Project,
+    config: &Config,
+) -> anyhow::Result<()> {
+    let history: Vec<CommitWrapper> = GitHistory::new(project, repo).collect();
+    changelog::prepare_changelog(history.clone().into_iter(), project, config).unwrap();
+    project.set_initial_release()?;
+    project.update_project_file()?;
+    create_clog_commit(repo, project, config, SemVer::version_1_0_0())
+}
+
+pub fn redo_release(
+    repo: &Repository,
+    project: &mut dyn Project,
+    config: &Config,
+) -> anyhow::Result<()> {
+    let history = GitHistory::new(project, repo);
+    remove_last_release_commit(repo, history)?;
+    bump_project_version(repo, project, config)
+}
 
 static DEFAULT_PATTERNS: Lazy<Patterns> = Lazy::new(|| Patterns {
     major: vec![Regex::new(r"^.*!:").unwrap()],
@@ -90,45 +131,22 @@ impl Default for Patterns {
     }
 }
 
-trait HistoryItem {
+pub trait HistoryItem {
     fn message(&self) -> String;
     fn version(&self) -> SemVer;
+    fn kind(&self) -> HistoryItemKind;
 }
 
-/// Create a commit which updates the changelog and bumps the version
-pub fn bump_project_version(
-    repo: &Repository,
-    project: &mut dyn Project,
-    config: &Config,
-) -> anyhow::Result<()> {
-    let history: Vec<CommitWrapper> = GitHistory::new(project, repo).collect();
-
-    changelog::prepare_changelog(history.clone().into_iter(), project, config).unwrap();
-
-    let next_version = match get_next_version(history.into_iter(), config) {
-        Some(v) => v,
-        None => return Ok(()),
-    };
-
-    create_clog_commit(repo, project, config, next_version)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HistoryItemKind {
+    Normal,
+    ClogBump,
 }
 
-/// Create the initial release commit on the current branch
-pub fn make_stable_release(
-    repo: &Repository,
-    project: &mut dyn Project,
-    config: &Config,
-) -> anyhow::Result<()> {
-    let history: Vec<CommitWrapper> = GitHistory::new(project, repo).collect();
-    changelog::prepare_changelog(history.clone().into_iter(), project, config).unwrap();
-    project.set_initial_release()?;
-    project.update_project_file()?;
-    create_clog_commit(repo, project, config, SemVer::version_1_0_0())
-}
-
-fn iterate_to_last_version<T>(history: T) -> impl Iterator<Item = CommitWrapper>
+fn iterate_to_last_version<I, H>(history: I) -> impl Iterator<Item = H>
 where
-    T: Iterator<Item = CommitWrapper>,
+    I: Iterator<Item = H>,
+    H: HistoryItem,
 {
     history.scan(None, |head_version, commit| {
         let v = commit.version();
@@ -144,10 +162,11 @@ where
     })
 }
 
-pub fn get_next_version<T: Iterator<Item = CommitWrapper>>(
-    history: T,
-    config: &Config,
-) -> Option<SemVer> {
+pub fn get_next_version<I, H>(history: I, config: &Config) -> Option<SemVer>
+where
+    I: Iterator<Item = H>,
+    H: HistoryItem,
+{
     let commits: Vec<_> = iterate_to_last_version(history).collect();
 
     let version = commits.first()?.version();
@@ -171,7 +190,7 @@ pub fn detect_project(config: &Config) -> anyhow::Result<Box<dyn Project>> {
     }
 }
 
-fn parse_commit_message<T: HistoryItem>(commit: &T, config: &Config) -> SemVerBump {
+fn parse_commit_message<H: HistoryItem>(commit: &H, config: &Config) -> SemVerBump {
     let message = commit.message();
     if config.patterns.major.iter().any(|r| r.is_match(&message)) {
         SemVerBump::Major

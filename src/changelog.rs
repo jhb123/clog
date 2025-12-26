@@ -81,7 +81,7 @@ fn generate_entire_changelog<T: Iterator<Item = CommitWrapper> + Clone>(
     Ok(())
 }
 
-fn get_all_changelog_entries<T: Iterator<Item = CommitWrapper> + Clone>(
+fn get_all_changelog_entries<T: Iterator<Item = impl HistoryItem> + Clone>(
     history: T,
     config: &Config,
 ) -> Vec<ChangeLogEntry> {
@@ -105,11 +105,15 @@ fn get_all_changelog_entries<T: Iterator<Item = CommitWrapper> + Clone>(
     changelog_entries
 }
 
-fn find_first_version_of_project<T: Iterator<Item = CommitWrapper>>(history: T) -> Option<SemVer> {
+fn find_first_version_of_project<T, H>(history: T) -> Option<SemVer>
+where
+    T: Iterator<Item = H>,
+    H: HistoryItem,
+{
     history.map(|c| c.version()).min()
 }
 
-fn get_changelog_message(commit: &CommitWrapper, config: &Config) -> Option<String> {
+fn get_changelog_message<T: HistoryItem>(commit: &T, config: &Config) -> Option<String> {
     let mut patterns = config
         .patterns
         .major
@@ -163,17 +167,47 @@ mod render {
 mod test {
 
     use crate::{
-        changelog::get_all_changelog_entries, changelog::ChangeLogEntry, semver::SemVer,
-        CommitWrapper, Config,
+        changelog::{get_all_changelog_entries, ChangeLogEntry},
+        semver::SemVer,
+        Config, HistoryItem, HistoryItemKind,
     };
 
     use rstest::rstest;
 
+    #[derive(Debug, Clone)]
+    struct TestCommitWrapper {
+        message: String,
+        version: SemVer,
+    }
+
+    impl TestCommitWrapper {
+        fn new(message: &str, version: SemVer) -> Self {
+            Self {
+                message: message.to_string(),
+                version,
+            }
+        }
+    }
+
+    impl HistoryItem for TestCommitWrapper {
+        fn message(&self) -> String {
+            self.message.clone()
+        }
+
+        fn version(&self) -> crate::semver::SemVer {
+            self.version.clone()
+        }
+
+        fn kind(&self) -> crate::HistoryItemKind {
+            HistoryItemKind::Normal
+        }
+    }
+
     #[rstest]
     #[case::single_version(
         vec![
-            CommitWrapper::new("feat: test 1", SemVer::new(0, 1, 0, None, None)),
-            CommitWrapper::new("fix: test 2", SemVer::new(0, 1, 0, None, None)),
+            TestCommitWrapper::new("feat: test 1", SemVer::new(0, 1, 0, None, None)),
+            TestCommitWrapper::new("fix: test 2", SemVer::new(0, 1, 0, None, None)),
         ],
         vec![
             ChangeLogEntry::BumpVersion(SemVer::new(0, 2, 0, None, None)),
@@ -184,12 +218,12 @@ mod test {
     )]
     #[case::multiple_version_bumps(
         vec![
-            CommitWrapper::new("feat: test 6", SemVer::new(0, 2, 0, None, None)),
-            CommitWrapper::new("feat: test 5", SemVer::new(0, 2, 0, None, None)),
-            CommitWrapper::new("feat: test 4", SemVer::new(0, 2, 0, None, None)),
-            CommitWrapper::new("feat: test 3", SemVer::new(0, 1, 0, None, None)),
-            CommitWrapper::new("feat: test 2", SemVer::new(0, 1, 0, None, None)),
-            CommitWrapper::new("feat: test 1", SemVer::new(0, 1, 0, None, None)),
+            TestCommitWrapper::new("feat: test 6", SemVer::new(0, 2, 0, None, None)),
+            TestCommitWrapper::new("feat: test 5", SemVer::new(0, 2, 0, None, None)),
+            TestCommitWrapper::new("feat: test 4", SemVer::new(0, 2, 0, None, None)),
+            TestCommitWrapper::new("feat: test 3", SemVer::new(0, 1, 0, None, None)),
+            TestCommitWrapper::new("feat: test 2", SemVer::new(0, 1, 0, None, None)),
+            TestCommitWrapper::new("feat: test 1", SemVer::new(0, 1, 0, None, None)),
         ],
         vec![
             ChangeLogEntry::BumpVersion(SemVer::new(0, 3, 0, None, None)),
@@ -205,15 +239,15 @@ mod test {
     )]
     #[case::no_bump_needed(
         vec![
-            CommitWrapper::new("chore: update docs", SemVer::new(1, 0, 0, None, None)),
-            CommitWrapper::new("chore: refactor", SemVer::new(1, 0, 0, None, None)),
+            TestCommitWrapper::new("chore: update docs", SemVer::new(1, 0, 0, None, None)),
+            TestCommitWrapper::new("chore: refactor", SemVer::new(1, 0, 0, None, None)),
         ],
         vec![]
     )]
     #[case::major_version_bump(
         vec![
-            CommitWrapper::new("feat!: breaking change", SemVer::new(1, 5, 0, None, None)),
-            CommitWrapper::new("feat: old feature", SemVer::new(1, 5, 0, None, None)),
+            TestCommitWrapper::new("feat!: breaking change", SemVer::new(1, 5, 0, None, None)),
+            TestCommitWrapper::new("feat: old feature", SemVer::new(1, 5, 0, None, None)),
         ],
         vec![
             ChangeLogEntry::BumpVersion(SemVer::new(2, 0, 0, None, None)),
@@ -227,7 +261,7 @@ mod test {
         vec![]
     )]
     fn test_history_to_changelog(
-        #[case] history: Vec<CommitWrapper>,
+        #[case] history: Vec<TestCommitWrapper>,
         #[case] expected: Vec<ChangeLogEntry>,
     ) {
         let config = Config::default();
