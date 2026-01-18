@@ -161,14 +161,29 @@ where
     })
 }
 
-fn is_last_version_bump_clog<I, H>(history: I) -> bool 
+fn is_last_version_bump_clog<I, H>(history: I) -> bool
 where
     I: Iterator<Item = H>,
     H: HistoryItem,
 {
-    iterate_to_last_version(history)
-        .last()
-        .is_some_and(|c| c.kind() == HistoryItemKind::ClogBump)
+    let mut iter = history.peekable();
+
+    let head_version = match iter.peek() {
+        Some(c) => c.version(),
+        None => return false,
+    };
+
+    while let Some(current) = iter.next() {
+        match iter.peek() {
+            Some(next) if next.version() < head_version => {
+                return current.kind() == HistoryItemKind::ClogBump;
+            }
+            Some(_) => continue,
+            None => return false,
+        }
+    }
+
+    false
 }
 
 pub fn get_next_version<I, H>(history: I, config: &Config) -> Option<SemVer>
@@ -443,54 +458,139 @@ mod test {
     #[rstest]
     #[case::clog_bump_is_most_recent(
         vec![
-            TestCommitWrapper::new("", SemVer::new_simple(0, 2, 0), HistoryItemKind::Normal),
-            TestCommitWrapper::new("", SemVer::new_simple(0, 2, 0), HistoryItemKind::ClogBump),
-            TestCommitWrapper::new("",  SemVer::new_simple(0, 1, 0), HistoryItemKind::Normal),
+            TestCommitWrapper::new("", SemVer::parse("0.2.0").unwrap(), HistoryItemKind::Normal),
+            TestCommitWrapper::new("", SemVer::parse("0.2.0").unwrap(), HistoryItemKind::ClogBump),
+            TestCommitWrapper::new("",  SemVer::parse("0.1.0").unwrap(), HistoryItemKind::Normal),
         ],
         true
     )]
-    #[case::clog_bump_is_last(
+    #[case::clog_bump_is_last_major(
         vec![
-            TestCommitWrapper::new("", SemVer::new_simple(0, 2, 0), HistoryItemKind::ClogBump),
-            TestCommitWrapper::new("",  SemVer::new_simple(0, 1, 0), HistoryItemKind::Normal),
+            TestCommitWrapper::new("", SemVer::parse("1.0.0").unwrap(), HistoryItemKind::ClogBump),
+            TestCommitWrapper::new("",  SemVer::parse("0.1.0").unwrap(), HistoryItemKind::Normal),
+        ],
+        true
+    )]
+    #[case::clog_bump_is_last_minor(
+        vec![
+            TestCommitWrapper::new("", SemVer::parse("0.2.0").unwrap(), HistoryItemKind::ClogBump),
+            TestCommitWrapper::new("",  SemVer::parse("0.1.0").unwrap(), HistoryItemKind::Normal),
         ],
         true
     )]
     #[case::normal_is_last(
         vec![
-            TestCommitWrapper::new("", SemVer::new_simple(0, 2, 0), HistoryItemKind::Normal),
-            TestCommitWrapper::new("",  SemVer::new_simple(0, 1, 0), HistoryItemKind::Normal),
+            TestCommitWrapper::new("", SemVer::parse("0.2.0").unwrap(), HistoryItemKind::Normal),
+            TestCommitWrapper::new("",  SemVer::parse("0.1.0").unwrap(), HistoryItemKind::Normal),
         ],
         false
     )]
     #[case::normal_is_most_recent(
         vec![
-            TestCommitWrapper::new("", SemVer::new_simple(0, 2, 0), HistoryItemKind::Normal),
-            TestCommitWrapper::new("", SemVer::new_simple(0, 2, 0), HistoryItemKind::Normal),
-            TestCommitWrapper::new("",  SemVer::new_simple(0, 1, 0), HistoryItemKind::Normal),
+            TestCommitWrapper::new("", SemVer::parse("0.2.0").unwrap(), HistoryItemKind::Normal),
+            TestCommitWrapper::new("", SemVer::parse("0.2.0").unwrap(), HistoryItemKind::Normal),
+            TestCommitWrapper::new("",  SemVer::parse("0.1.0").unwrap(), HistoryItemKind::Normal),
         ],
         false
     )]
     #[case::normal_is_most_recent_with_clog(
         vec![
-            TestCommitWrapper::new("", SemVer::new_simple(0, 3, 0), HistoryItemKind::Normal),
-            TestCommitWrapper::new("", SemVer::new_simple(0, 2, 0), HistoryItemKind::ClogBump),
-            TestCommitWrapper::new("", SemVer::new_simple(0, 2, 0), HistoryItemKind::Normal),
-            TestCommitWrapper::new("",  SemVer::new_simple(0, 1, 0), HistoryItemKind::Normal),
+            TestCommitWrapper::new("", SemVer::parse("0.3.0").unwrap(), HistoryItemKind::Normal),
+            TestCommitWrapper::new("", SemVer::parse("0.2.0").unwrap(), HistoryItemKind::ClogBump),
+            TestCommitWrapper::new("", SemVer::parse("0.2.0").unwrap(), HistoryItemKind::Normal),
+            TestCommitWrapper::new("",  SemVer::parse("0.1.0").unwrap(), HistoryItemKind::Normal),
         ],
         false
     )]
     #[case::empty_history(vec![], false)]
     #[case::single_entry_is_clog(
-        vec![TestCommitWrapper::new("", SemVer::new_simple(0, 1, 0), HistoryItemKind::ClogBump)],
-        true
+        vec![TestCommitWrapper::new("", SemVer::parse("0.1.0").unwrap(), HistoryItemKind::ClogBump)],
+        false // no bump actually happened, so "last version is clog" makes no sense
     )]
     #[case::single_entry_is_normal(
-        vec![TestCommitWrapper::new("", SemVer::new_simple(0, 1, 0), HistoryItemKind::Normal)],
+        vec![TestCommitWrapper::new("", SemVer::parse("0.1.0").unwrap(), HistoryItemKind::Normal)],
         false
     )]
-    fn test_is_last_version_bump_clog(#[case] history: Vec<TestCommitWrapper>, #[case] expected: bool) {
+    #[case::miscatorgoised_does_nothing(
+        vec![
+            TestCommitWrapper::new("", SemVer::parse("0.1.0").unwrap(), HistoryItemKind::Normal),
+            TestCommitWrapper::new("", SemVer::parse("0.1.0").unwrap(), HistoryItemKind::ClogBump),
+            TestCommitWrapper::new("", SemVer::parse("0.1.0").unwrap(), HistoryItemKind::Normal)
+            ],
+        false
+    )]
+    #[case::miscatorgoised_does_nothing2(
+        vec![
+            TestCommitWrapper::new("", SemVer::parse("0.1.0").unwrap(), HistoryItemKind::Normal),
+            TestCommitWrapper::new("", SemVer::parse("0.1.0").unwrap(), HistoryItemKind::Normal),
+            TestCommitWrapper::new("", SemVer::parse("0.1.0").unwrap(), HistoryItemKind::ClogBump)
+            ],
+        false
+    )]
+    #[case::messed_up_history(
+        vec![
+            TestCommitWrapper::new("", SemVer::parse("0.1.0").unwrap(), HistoryItemKind::Normal),
+            TestCommitWrapper::new("", SemVer::parse("0.0.1").unwrap(), HistoryItemKind::ClogBump),
+            TestCommitWrapper::new("", SemVer::parse("0.1.0").unwrap(), HistoryItemKind::Normal)
+            ],
+        false
+    )]
+    #[case::messed_up_history_2(
+        vec![
+            TestCommitWrapper::new("", SemVer::parse("0.1.0").unwrap(), HistoryItemKind::Normal),
+            TestCommitWrapper::new("", SemVer::parse("1.0.0").unwrap(), HistoryItemKind::ClogBump),
+            TestCommitWrapper::new("", SemVer::parse("0.1.0").unwrap(), HistoryItemKind::Normal)
+            ],
+        false
+    )]
+    #[case::metadata_only_is_not_a_bump(
+        vec![
+            TestCommitWrapper::new("", SemVer::parse("1.0.0+build.2").unwrap(), HistoryItemKind::ClogBump),
+            TestCommitWrapper::new("", SemVer::parse("1.0.0+build.1").unwrap(), HistoryItemKind::Normal),
+        ],
+        false,
+    )]
+    #[case::metadata_only_is_not_a_bump_all_clog(
+        vec![
+            TestCommitWrapper::new("", SemVer::parse("1.0.0+build.2").unwrap(), HistoryItemKind::ClogBump),
+            TestCommitWrapper::new("", SemVer::parse("1.0.0+build.1").unwrap(), HistoryItemKind::ClogBump),
+        ],
+        false
+    )]
+    #[case::metadata_only_is_not_a_bump_no_clog(
+        vec![
+            TestCommitWrapper::new("", SemVer::parse("1.0.0+build.2").unwrap(), HistoryItemKind::Normal),
+            TestCommitWrapper::new("", SemVer::parse("1.0.0+build.1").unwrap(), HistoryItemKind::Normal),
+        ],
+        false
+    )]
+    fn test_is_last_version_bump_clog(
+        #[case] history: Vec<TestCommitWrapper>,
+        #[case] expected: bool,
+    ) {
         let result = is_last_version_bump_clog(history.into_iter());
         assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_iterate_to_last_version_includes_build_metadata_changes() {
+        let history = vec![
+            TestCommitWrapper::new(
+                "",
+                SemVer::parse("1.0.0+build.2").unwrap(),
+                HistoryItemKind::Normal,
+            ),
+            TestCommitWrapper::new(
+                "",
+                SemVer::parse("1.0.0+build.1").unwrap(),
+                HistoryItemKind::Normal,
+            ),
+        ];
+        let mut result = iterate_to_last_version(history.into_iter());
+
+        // Both should be returned because they have the same version precedence
+        assert!(result.next().is_some());
+        assert!(result.next().is_some());
+        assert!(result.next().is_none());
     }
 }

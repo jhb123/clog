@@ -44,13 +44,6 @@ impl SemVer {
         }
     }
 
-    pub fn new_simple(major: usize,
-        minor: usize,
-        patch: usize,
-    ) -> Self {
-        Self { major, minor, patch, ..Default::default() }
-    }
-
     pub fn version_0_1_0() -> Self {
         Self {
             major: 0,
@@ -136,6 +129,8 @@ impl Display for SemVer {
 }
 
 impl PartialEq for SemVer {
+    // according to semver, build meta does not affect precedence,
+    // so to keep == following semver, we ignore it.
     fn eq(&self, other: &Self) -> bool {
         self.major == other.major
             && self.minor == other.minor
@@ -246,6 +241,13 @@ mod test {
         assert_eq!(compare_prerelease("alpha", "alpha.1"), Ordering::Less);
         assert_eq!(compare_prerelease("alpha.0", "beta"), Ordering::Less);
         assert_eq!(compare_prerelease("alpha.0", "alpha.beta"), Ordering::Less);
+    }
+
+    #[test]
+    fn test_build_version_does_not_affect_precedance() {
+        let v1 = SemVer::parse("1.0.0+build.1").unwrap();
+        let v2 = SemVer::parse("1.0.0+build.2").unwrap();
+        assert_eq!(v1, v2);
     }
 
     #[test]
