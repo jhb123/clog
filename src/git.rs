@@ -2,7 +2,8 @@ use anyhow::anyhow;
 use git2::{Commit, Oid, Repository, Revwalk, Signature, Sort, StatusOptions};
 
 use crate::{
-    Config, HistoryItem, HistoryItemKind, Project, is_last_version_bump_clog, iterate_to_last_version, semver::SemVer
+    is_last_version_bump_clog, iterate_to_last_version, semver::SemVer, Config, HistoryItem,
+    HistoryItemKind, Project,
 };
 
 static CLOG_TRAILER: &str = "Bumped-by: clog";
@@ -147,9 +148,7 @@ pub fn create_clog_commit(
     Ok(())
 }
 
-pub fn remove_last_release_commit(repo: &Repository, project: &dyn Project,
-) -> anyhow::Result<()> {
-
+pub fn remove_last_release_commit(repo: &Repository, project: &dyn Project) -> anyhow::Result<()> {
     let history = GitHistory::new(project, repo);
     if !is_last_version_bump_clog(history) {
         return Err(anyhow!(

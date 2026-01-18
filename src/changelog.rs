@@ -169,8 +169,8 @@ mod test {
     use crate::{
         changelog::{get_all_changelog_entries, ChangeLogEntry},
         semver::SemVer,
+        test_support::TestCommitWrapper,
         Config,
-        test_support::TestCommitWrapper
     };
 
     use rstest::rstest;
