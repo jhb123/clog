@@ -1,0 +1,2 @@
+[alias]
+    bump = "!f() { GIT_SEMVER_BUMP=$1 git commit; }; f"

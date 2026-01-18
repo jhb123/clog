@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{fs, io::Write, path::Path};
 
 use anyhow::{anyhow, Context, Error};
 use clap::{Parser, Subcommand};
@@ -26,6 +26,7 @@ enum Commands {
     Bump,
     Redo,
     Stable,
+    InstallAliases,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -43,6 +44,7 @@ fn main() -> anyhow::Result<()> {
         Commands::Bump => bump_release(&repo, &config, cli.yes),
         Commands::Redo => redo_release(&repo, &config, cli.yes),
         Commands::Stable => major_version_one(&repo, &config, cli.yes),
+        Commands::InstallAliases => install_aliases(current_dir),
     }
 }
 
@@ -138,6 +140,32 @@ fn redo_release(repo: &Repository, config: &Config, auto_yes: bool) -> anyhow::R
     if should_redo {
         clog::redo_release(repo, project.as_mut(), config)?;
     }
+
+    Ok(())
+}
+
+pub fn install_aliases(repo_root: &Path) -> anyhow::Result<()> {
+    let git_config = include_str!("./static/.gitconfig.template");
+    let prepare_commit_msg = include_str!("./static/.prepare-commit-msg.template");
+
+    let config_path = repo_root.join(".git").join("config");
+
+    fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(config_path)?
+        .write_all(git_config.as_bytes())?;
+
+    let hooks_dir = repo_root.join(".git").join("hooks");
+    fs::create_dir_all(&hooks_dir)?;
+
+    let hook_path = hooks_dir.join("prepare-commit-msg");
+
+    fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&hook_path)?
+        .write_all(prepare_commit_msg.as_bytes())?;
 
     Ok(())
 }

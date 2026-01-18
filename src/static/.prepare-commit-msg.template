@@ -1,0 +1,11 @@
+#!/bin/sh
+
+BUMP="${GIT_SEMVER_BUMP:-}"
+[ -z "$BUMP" ] && exit 0
+
+grep -q '^Semver-Bump:' "$1" && exit 0
+
+{
+  echo ""
+  echo "Semver-Bump: $BUMP"
+} >> "$1"
