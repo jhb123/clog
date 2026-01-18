@@ -61,8 +61,7 @@ pub fn redo_release(
     project: &mut dyn Project,
     config: &Config,
 ) -> anyhow::Result<()> {
-    let history = GitHistory::new(project, repo);
-    remove_last_release_commit(repo, history)?;
+    remove_last_release_commit(repo, project)?;
     bump_project_version(repo, project, config)
 }
 
@@ -160,6 +159,16 @@ where
             _ => None,
         }
     })
+}
+
+fn is_last_version_bump_clog<I, H>(history: I) -> bool 
+where
+    I: Iterator<Item = H>,
+    H: HistoryItem,
+{
+    iterate_to_last_version(history)
+        .last()
+        .is_some_and(|c| c.kind() == HistoryItemKind::ClogBump)
 }
 
 pub fn get_next_version<I, H>(history: I, config: &Config) -> Option<SemVer>
@@ -432,5 +441,56 @@ mod test {
     }
 
     #[rstest]
-    fn test_next_version() {}
+    #[case::clog_bump_is_most_recent(
+        vec![
+            TestCommitWrapper::new("", SemVer::new_simple(0, 2, 0), HistoryItemKind::Normal),
+            TestCommitWrapper::new("", SemVer::new_simple(0, 2, 0), HistoryItemKind::ClogBump),
+            TestCommitWrapper::new("",  SemVer::new_simple(0, 1, 0), HistoryItemKind::Normal),
+        ],
+        true
+    )]
+    #[case::clog_bump_is_last(
+        vec![
+            TestCommitWrapper::new("", SemVer::new_simple(0, 2, 0), HistoryItemKind::ClogBump),
+            TestCommitWrapper::new("",  SemVer::new_simple(0, 1, 0), HistoryItemKind::Normal),
+        ],
+        true
+    )]
+    #[case::normal_is_last(
+        vec![
+            TestCommitWrapper::new("", SemVer::new_simple(0, 2, 0), HistoryItemKind::Normal),
+            TestCommitWrapper::new("",  SemVer::new_simple(0, 1, 0), HistoryItemKind::Normal),
+        ],
+        false
+    )]
+    #[case::normal_is_most_recent(
+        vec![
+            TestCommitWrapper::new("", SemVer::new_simple(0, 2, 0), HistoryItemKind::Normal),
+            TestCommitWrapper::new("", SemVer::new_simple(0, 2, 0), HistoryItemKind::Normal),
+            TestCommitWrapper::new("",  SemVer::new_simple(0, 1, 0), HistoryItemKind::Normal),
+        ],
+        false
+    )]
+    #[case::normal_is_most_recent_with_clog(
+        vec![
+            TestCommitWrapper::new("", SemVer::new_simple(0, 3, 0), HistoryItemKind::Normal),
+            TestCommitWrapper::new("", SemVer::new_simple(0, 2, 0), HistoryItemKind::ClogBump),
+            TestCommitWrapper::new("", SemVer::new_simple(0, 2, 0), HistoryItemKind::Normal),
+            TestCommitWrapper::new("",  SemVer::new_simple(0, 1, 0), HistoryItemKind::Normal),
+        ],
+        false
+    )]
+    #[case::empty_history(vec![], false)]
+    #[case::single_entry_is_clog(
+        vec![TestCommitWrapper::new("", SemVer::new_simple(0, 1, 0), HistoryItemKind::ClogBump)],
+        true
+    )]
+    #[case::single_entry_is_normal(
+        vec![TestCommitWrapper::new("", SemVer::new_simple(0, 1, 0), HistoryItemKind::Normal)],
+        false
+    )]
+    fn test_is_last_version_bump_clog(#[case] history: Vec<TestCommitWrapper>, #[case] expected: bool) {
+        let result = is_last_version_bump_clog(history.into_iter());
+        assert_eq!(result, expected);
+    }
 }

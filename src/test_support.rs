@@ -7,10 +7,7 @@ use regex::Regex;
 use std::{fs, path::Path, process::exit};
 
 use crate::{
-    git::repo_has_commits,
-    python::PyProject,
-    semver::{SemVer, SemVerBump},
-    Project,
+    HistoryItem, HistoryItemKind, Project, git::repo_has_commits, python::PyProject, semver::{SemVer, SemVerBump}
 };
 
 static CLOG_MSG: Lazy<Regex> = Lazy::new(|| {
@@ -295,4 +292,39 @@ pub fn assert_clog_commit_version<P: AsRef<std::path::Path>>(dir: &P, version: S
         .captures(head_commit.message_raw().unwrap())
         .unwrap();
     assert_eq!(version, SemVer::parse(&caps["to"]).unwrap());
+}
+
+#[derive(Debug, Clone)]
+pub struct TestCommitWrapper {
+    message: String,
+    version: SemVer,
+    kind: HistoryItemKind
+}
+
+impl TestCommitWrapper {
+   pub fn new(message: &str, version: SemVer, kind: HistoryItemKind) -> Self {
+        Self {
+            message: message.to_string(),
+            version,
+            kind,
+        }
+    }
+
+    pub fn new_normal(message: &str, version: SemVer) -> Self {
+        Self::new(message,version, HistoryItemKind::Normal)        
+    }
+}
+
+impl HistoryItem for TestCommitWrapper {
+    fn message(&self) -> String {
+        self.message.clone()
+    }
+
+    fn version(&self) -> crate::semver::SemVer {
+        self.version.clone()
+    }
+
+    fn kind(&self) -> crate::HistoryItemKind {
+        self.kind
+    }
 }
