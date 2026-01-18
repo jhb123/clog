@@ -10,7 +10,7 @@
 - feat: detect Cargo.lock for rust projects
 - feat: detect the most recent version bump in project
 # Version 0.2.0
-fix: cargo project uses project instead of package
+- fix: cargo project uses project instead of package
 - feat: check repo is clean state before making release commit
 - fix: multi-line conventional commits regex
 - feat: semver parsing and release commits for python and rust
