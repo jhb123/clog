@@ -1,3 +1,6 @@
+# Version 0.5.0
+- fix: iteratre to last version should always check for version bump
+- feat: "redo release" sub command
 # Version 0.4.1
 - fix: appended changelog generation
 - fix: formatting lists in markdown changelog
