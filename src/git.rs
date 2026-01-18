@@ -2,7 +2,7 @@ use anyhow::anyhow;
 use git2::{Commit, Oid, Repository, Revwalk, Signature, Sort, StatusOptions};
 
 use crate::{
-    iterate_to_last_version, semver::SemVer, Config, HistoryItem, HistoryItemKind, Project,
+    Config, HistoryItem, HistoryItemKind, Project, is_last_version_bump_clog, iterate_to_last_version, semver::SemVer
 };
 
 static CLOG_TRAILER: &str = "Bumped-by: clog";
@@ -147,18 +147,19 @@ pub fn create_clog_commit(
     Ok(())
 }
 
-pub fn remove_last_release_commit(repo: &Repository, history: GitHistory) -> anyhow::Result<()> {
-    let mut commits: Vec<CommitWrapper> = iterate_to_last_version(history).collect();
-    commits.reverse();
+pub fn remove_last_release_commit(repo: &Repository, project: &dyn Project,
+) -> anyhow::Result<()> {
 
-    if commits
-        .first()
-        .is_some_and(|c| c.kind() == HistoryItemKind::Normal)
-    {
+    let history = GitHistory::new(project, repo);
+    if !is_last_version_bump_clog(history) {
         return Err(anyhow!(
             "The last release was not performed by clog, cannot redo"
         ));
     }
+
+    let history = GitHistory::new(project, repo);
+    let mut commits: Vec<CommitWrapper> = iterate_to_last_version(history).collect();
+    commits.reverse();
 
     let base = repo
         .find_commit(commits.first().map(|x| x.id).unwrap())?
@@ -179,8 +180,6 @@ pub fn remove_last_release_commit(repo: &Repository, history: GitHistory) -> any
 
         let parent = repo.head()?.peel_to_commit()?;
         let parents = [&parent];
-
-        println!("applying: {:?}", commit.message());
 
         repo.commit(
             Some("HEAD"),
@@ -229,7 +228,7 @@ mod test {
 
     use crate::{
         detect_project,
-        git::{create_clog_commit, make_clog_commit_message, CommitWrapper},
+        git::{make_clog_commit_message, CommitWrapper},
         semver::SemVer,
         test_support::{empty_commit, init_python_repo_0_1_0},
         Config, HistoryItemKind,
@@ -259,7 +258,7 @@ mod test {
     fn test_clog_commit_kind(pre_stable_repo_dir: TempDir) {
         let repo = Repository::open(&pre_stable_repo_dir).unwrap();
         let config = Config::new(&pre_stable_repo_dir);
-        let mut project = detect_project(&config).unwrap();
+        let project = detect_project(&config).unwrap();
         empty_commit(&repo, "feat: test commit\nthis is a test\ntrailer text").unwrap();
         let commit = repo
             .head()

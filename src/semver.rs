@@ -44,6 +44,13 @@ impl SemVer {
         }
     }
 
+    pub fn new_simple(major: usize,
+        minor: usize,
+        patch: usize,
+    ) -> Self {
+        Self { major, minor, patch, ..Default::default() }
+    }
+
     pub fn version_0_1_0() -> Self {
         Self {
             major: 0,
