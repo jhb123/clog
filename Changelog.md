@@ -1,3 +1,6 @@
+# Version 0.6.0
+- Add trailer commits to release notes
+- feat: make alias installation
 # Version 0.5.0
 - fix: iteratre to last version should always check for version bump
 - feat: "redo release" sub command
