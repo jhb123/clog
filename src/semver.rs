@@ -325,4 +325,13 @@ mod test {
         assert!(SemVerBump::Minor > SemVerBump::Patch);
         assert!(SemVerBump::Patch > SemVerBump::None);
     }
+
+    #[test]
+    fn test_bump_eq() {
+        assert_eq!(SemVerBump::Major, SemVerBump::Major);
+        assert_eq!(SemVerBump::Minor, SemVerBump::Minor);
+        assert_eq!(SemVerBump::Patch, SemVerBump::Patch);
+        assert_eq!(SemVerBump::None, SemVerBump::None);
+        assert_ne!(SemVerBump::None, SemVerBump::Patch);
+    }
 }
