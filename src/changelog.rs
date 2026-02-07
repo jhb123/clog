@@ -3,8 +3,11 @@ use std::{fs, io::Write};
 use anyhow::Ok;
 
 use crate::{
-    get_next_version, git::CommitWrapper, iterate_to_last_version, semver::SemVer, Config,
-    HistoryItem, Project,
+    get_next_version,
+    git::CommitWrapper,
+    iterate_to_last_version,
+    semver::{SemVer, SemVerBump},
+    Config, HistoryItem, Project,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -114,6 +117,25 @@ where
 }
 
 fn get_changelog_message<T: HistoryItem>(commit: &T, config: &Config) -> Option<String> {
+    if let Some(s) = changelog_from_trailer_commit(commit) {
+        return Some(s);
+    }
+    changelog_from_conventional_commit(commit, config)
+}
+
+fn changelog_from_trailer_commit<T: HistoryItem>(commit: &T) -> Option<String> {
+    let bump = crate::get_bump_from_trailer(&commit.message());
+    if bump == SemVerBump::None {
+        None
+    } else {
+        commit.message().split("\n").next().map(|x| String::from(x))
+    }
+}
+
+fn changelog_from_conventional_commit<T: HistoryItem>(
+    commit: &T,
+    config: &Config,
+) -> Option<String> {
     let mut patterns = config
         .patterns
         .major
@@ -231,6 +253,18 @@ mod test {
     #[case::empty_history(
         vec![],
         vec![]
+    )]
+    #[case::trailer_style(
+        vec![
+            TestCommitWrapper::new_normal(&format!("trailer feature\n{}: {}",crate::CLOG_BUMP_TRAILER, "patch"), SemVer::new(1, 5, 0, None, None)),
+            TestCommitWrapper::new_normal("feat: old feature", SemVer::new(1, 5, 0, None, None)),
+        ],
+        vec![
+            ChangeLogEntry::BumpVersion(SemVer::new(1, 6, 0, None, None)),
+            ChangeLogEntry::Entry("trailer feature".to_string()),
+            ChangeLogEntry::Entry("feat: old feature".to_string()),
+            ChangeLogEntry::InitialVersion(SemVer::new(1, 5, 0, None, None)),
+        ]
     )]
     fn test_history_to_changelog(
         #[case] history: Vec<TestCommitWrapper>,
