@@ -25,6 +25,8 @@ use crate::{
     semver::{SemVer, SemVerBump},
 };
 
+const CLOG_BUMP_TRAILER: &str = "Clog-Semver-Bump";
+
 /// Create a commit which updates the changelog and bumps the version
 pub fn bump_project_version(
     repo: &Repository,
@@ -196,7 +198,7 @@ where
     let version = commits.first()?.version();
     let bump = commits
         .iter()
-        .map(|c| parse_commit_message(c, config))
+        .map(|c| parse_commit_message(&c.message(), config))
         .max()?;
     if bump == SemVerBump::None {
         return None;
@@ -214,8 +216,16 @@ pub fn detect_project(config: &Config) -> anyhow::Result<Box<dyn Project>> {
     }
 }
 
-fn parse_commit_message<H: HistoryItem>(commit: &H, config: &Config) -> SemVerBump {
-    let message = commit.message();
+fn parse_commit_message(commit_message: &str, config: &Config) -> SemVerBump {
+    let bump = get_bump_from_trailer(commit_message);
+    if bump != SemVerBump::None {
+        return bump;
+    }
+    get_bump_from_heading(config, commit_message)
+}
+
+fn get_bump_from_heading(config: &Config, message: &str) -> SemVerBump {
+    let message = message.trim().to_lowercase();
     if config.patterns.major.iter().any(|r| r.is_match(&message)) {
         SemVerBump::Major
     } else if config.patterns.minor.iter().any(|r| r.is_match(&message)) {
@@ -225,6 +235,28 @@ fn parse_commit_message<H: HistoryItem>(commit: &H, config: &Config) -> SemVerBu
     } else {
         SemVerBump::None
     }
+}
+
+fn get_bump_from_trailer(commit_message: &str) -> SemVerBump {
+    for line in commit_message.lines() {
+        if line.starts_with(CLOG_BUMP_TRAILER) {
+            let mut parts = line.split_terminator(':');
+            if let Some(bump) = parts.nth(1).map(|x| x.trim().to_lowercase()).and_then(|x| {
+                if &x == "patch" {
+                    Some(SemVerBump::Patch)
+                } else if &x == "minor" {
+                    Some(SemVerBump::Minor)
+                } else if &x == "major" {
+                    Some(SemVerBump::Major)
+                } else {
+                    None
+                }
+            }) {
+                return bump;
+            }
+        }
+    }
+    SemVerBump::None
 }
 
 #[cfg(test)]
@@ -592,5 +624,26 @@ mod test {
         assert!(result.next().is_some());
         assert!(result.next().is_some());
         assert!(result.next().is_none());
+    }
+
+    #[rstest]
+    #[case::conventional_commit_minor("feat: 1", SemVerBump::Minor)]
+    #[case::conventional_commit_patch("fix: 1", SemVerBump::Patch)]
+    #[case::conventional_commit_major("feat!: 1", SemVerBump::Major)]
+    #[case::conventional_commit_major("Feat!: 1", SemVerBump::Major)]
+    #[case::no_bump("nothing", SemVerBump::None)]
+    #[case::major("\nfeat!: 1\n", SemVerBump::Major)]
+    #[case::trailer_minor(&format!("message\n{}:{}",CLOG_BUMP_TRAILER, "minor"),SemVerBump::Minor)]
+    #[case::trailer_major(&format!("message\n{}:{}",CLOG_BUMP_TRAILER, "major"),SemVerBump::Major)]
+    #[case::trailer_patch(&format!("message\n{}:{}",CLOG_BUMP_TRAILER, "patch"),SemVerBump::Patch)]
+    #[case::trailer_patch(&format!("message\n{}: {}",CLOG_BUMP_TRAILER, "patch"),SemVerBump::Patch)]
+    #[case::trailer_patch(&format!("message\n{}: {}",CLOG_BUMP_TRAILER, "PATCH"),SemVerBump::Patch)]
+    #[case::trailer_none(&format!("message\n{}:{}",CLOG_BUMP_TRAILER, "adfdsfadf"),SemVerBump::None)]
+    #[case::trailer_none(&format!("message\n{}:{}",CLOG_BUMP_TRAILER, ""),SemVerBump::None)]
+    #[case::trailer_and_conventional(&format!("fix: test\n{}:{}",CLOG_BUMP_TRAILER, "lladff"),SemVerBump::Patch)]
+    #[case::trailer_and_conventional(&format!("fix: test\n{}:{}",CLOG_BUMP_TRAILER, "minor"),SemVerBump::Minor)]
+    fn test_parse_commit_message(#[case] message: &str, #[case] bump: SemVerBump) {
+        let config = Config::default();
+        assert_eq!(bump, parse_commit_message(message, &config))
     }
 }
