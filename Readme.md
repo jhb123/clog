@@ -3,6 +3,24 @@
 clog reads your git history to automate producing changelogs
 and semtically versioning your project.
 
+# Installation
+
+Download the latest release for your platform from the [releases page](../../releases/latest):
+
+```bash
+# macOS
+curl -L https://github.com/jhb123/clog/releases/latest/download/clog-macos.tar.gz | tar -xz -C ~/.local/bin/
+
+# Linux
+curl -L https://github.com/jhb123/clog/releases/latest/download/clog-linux.tar.gz | tar -xz -C ~/.local/bin/
+```
+
+Alternatively, build from source with Cargo:
+
+```bash
+cargo install --git https://github.com/jhb123/clog
+```
+
 # Usage
 
 If you follow conventional commits, then clog will parse
