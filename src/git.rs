@@ -60,7 +60,7 @@ impl CommitWrapper {
             .to_string();
 
         let tree = commit.tree().unwrap();
-        let tree_entry = tree.get_path(project.get_version_file()).unwrap();
+        let tree_entry = tree.get_path(project.get_version_file())?;
         let blob = tree_entry
             .to_object(repo)
             .expect("Null ptr converting tree to blob")
