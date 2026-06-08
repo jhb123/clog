@@ -1,0 +1,43 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and release (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            artifact: clog-macos.tar.gz
+          - os: ubuntu-latest
+            artifact: clog-linux.tar.gz
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build release binary
+        run: cargo build --release --verbose
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          tar -czf dist/${{ matrix.artifact }} -C target/release clog
+
+      - name: Upload release tarball
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/${{ matrix.artifact }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
