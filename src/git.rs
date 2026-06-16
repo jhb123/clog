@@ -1,5 +1,7 @@
 use anyhow::anyhow;
-use git2::{Commit, Oid, Repository, Revwalk, Signature, Sort, StatusOptions};
+use git2::{
+    Commit, DiffFormat, DiffOptions, Oid, Repository, Revwalk, Signature, Sort, StatusOptions,
+};
 
 use crate::{
     is_last_version_bump_clog, iterate_to_last_version, semver::SemVer, Config, HistoryItem,
@@ -204,6 +206,42 @@ pub fn is_repo_ready(repo: &Repository) -> bool {
 
 pub fn repo_has_commits(repo: &Repository) -> bool {
     repo.head().ok().and_then(|h| h.target()).is_some()
+}
+
+pub fn generate_diff_string(
+    repo: &Repository,
+    history: Vec<CommitWrapper>,
+) -> anyhow::Result<String> {
+    if history.is_empty() {
+        return Ok("".to_string());
+    }
+    let commits: Vec<CommitWrapper> = iterate_to_last_version(history.into_iter()).collect();
+    let from = &commits.first().unwrap().id;
+    let to = &commits.last().unwrap().id;
+
+    let base_tree = repo.find_commit(from.clone())?.parent(0)?.tree()?;
+    let head_tree = repo.find_commit(to.clone())?.tree()?;
+
+    let mut opts = DiffOptions::new();
+    opts.reverse(false)
+        .force_text(true)
+        .ignore_whitespace_eol(false) // handy for "formatting"
+        .ignore_whitespace_change(false)
+        .ignore_whitespace(false)
+        .include_ignored(false)
+        .include_untracked(false)
+        .patience(true)
+        .minimal(true);
+
+    let diff = repo.diff_tree_to_tree(Some(&base_tree), Some(&head_tree), Some(&mut opts))?;
+
+    let mut diff_str = String::new();
+    diff.print(DiffFormat::Patch, |_delta, _hunk, line| {
+        let content = std::str::from_utf8(line.content()).unwrap_or("");
+        diff_str.push_str(content);
+        true
+    })?;
+    Ok(diff_str)
 }
 
 fn repo_is_clean(repo: &Repository) -> bool {

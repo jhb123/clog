@@ -5,7 +5,9 @@ mod rust;
 pub mod semver;
 
 use std::{
+    io::Write,
     path::{Path, PathBuf},
+    process::{Command, Stdio},
     vec,
 };
 
@@ -19,7 +21,10 @@ pub mod test_support;
 pub use crate::git::is_repo_ready;
 
 use crate::{
-    git::{create_clog_commit, remove_last_release_commit, CommitWrapper, GitHistory},
+    git::{
+        create_clog_commit, generate_diff_string, remove_last_release_commit, CommitWrapper,
+        GitHistory,
+    },
     python::PyProject,
     rust::CargoProject,
     semver::{SemVer, SemVerBump},
@@ -34,8 +39,8 @@ pub fn bump_project_version(
     config: &Config,
 ) -> anyhow::Result<()> {
     let history: Vec<CommitWrapper> = GitHistory::new(project, repo).collect();
-
-    changelog::prepare_changelog(history.clone().into_iter(), project, config).unwrap();
+    let diff = generate_diff_string(repo, history.clone())?;
+    changelog::prepare_changelog(history.clone().into_iter(), &diff, project, config).unwrap();
 
     let next_version = match get_next_version(history.into_iter(), config) {
         Some(v) => v,
@@ -52,7 +57,8 @@ pub fn make_stable_release(
     config: &Config,
 ) -> anyhow::Result<()> {
     let history: Vec<CommitWrapper> = GitHistory::new(project, repo).collect();
-    changelog::prepare_changelog(history.clone().into_iter(), project, config).unwrap();
+    let diff = generate_diff_string(repo, history.clone())?;
+    changelog::prepare_changelog(history.clone().into_iter(), &diff, project, config).unwrap();
     project.set_initial_release()?;
     project.update_project_file()?;
     create_clog_commit(repo, project, config, SemVer::version_1_0_0())
@@ -65,6 +71,34 @@ pub fn redo_release(
 ) -> anyhow::Result<()> {
     remove_last_release_commit(repo, project)?;
     bump_project_version(repo, project, config)
+}
+
+pub fn preview_release(repo: &Repository, config: &Config) -> anyhow::Result<()> {
+    let mut project = detect_project(config)?;
+    let history: Vec<CommitWrapper> = GitHistory::new(project.as_mut(), repo).collect();
+    let diff = generate_diff_string(repo, history.clone())?;
+
+    let pager = repo
+        .config()
+        .ok()
+        .and_then(|c| {
+            c.get_string("pager.diff")
+                .ok()
+                .or_else(|| c.get_string("core.pager").ok())
+        })
+        .unwrap_or_else(|| "less".to_string());
+
+    let mut child = Command::new("sh")
+        .arg("-c")
+        .arg(&pager)
+        .stdin(Stdio::piped())
+        .spawn()?;
+
+    child.stdin.as_mut().unwrap().write_all(diff.as_bytes())?;
+    drop(child.stdin.take()); // signal EOF
+    child.wait()?;
+
+    Ok(())
 }
 
 static DEFAULT_PATTERNS: Lazy<Patterns> = Lazy::new(|| Patterns {

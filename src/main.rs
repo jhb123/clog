@@ -27,6 +27,7 @@ enum Commands {
     Redo,
     Stable,
     InstallAliases,
+    Preview,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -45,6 +46,7 @@ fn main() -> anyhow::Result<()> {
         Commands::Redo => redo_release(&repo, &config, cli.yes),
         Commands::Stable => major_version_one(&repo, &config, cli.yes),
         Commands::InstallAliases => install_aliases(current_dir),
+        Commands::Preview => clog::preview_release(&repo, &config),
     }
 }
 

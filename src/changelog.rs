@@ -19,6 +19,7 @@ enum ChangeLogEntry {
 
 pub fn prepare_changelog<T: Iterator<Item = CommitWrapper> + Clone>(
     history: T,
+    diff: &str,
     project: &dyn Project,
     config: &Config,
 ) -> anyhow::Result<()> {
