@@ -101,6 +101,10 @@ impl HistoryItem for CommitWrapper {
     fn kind(&self) -> HistoryItemKind {
         self.kind
     }
+
+    fn commit_id(&self) -> Option<Oid> {
+        Some(self.id)
+    }
 }
 
 /// Create a bump commit on the current branch
@@ -208,24 +212,24 @@ pub fn repo_has_commits(repo: &Repository) -> bool {
     repo.head().ok().and_then(|h| h.target()).is_some()
 }
 
-pub fn generate_diff_string(
+pub fn generate_diff_for_window(
     repo: &Repository,
-    history: Vec<CommitWrapper>,
+    commits: &[CommitWrapper],
 ) -> anyhow::Result<String> {
-    if history.is_empty() {
-        return Ok("".to_string());
+    match (commits.first(), commits.last()) {
+        (Some(newest), Some(oldest)) => diff_oids(repo, newest.id, oldest.id),
+        _ => Ok(String::new()),
     }
-    let commits: Vec<CommitWrapper> = iterate_to_last_version(history.into_iter()).collect();
-    let from = &commits.first().unwrap().id;
-    let to = &commits.last().unwrap().id;
+}
 
-    let base_tree = repo.find_commit(from.clone())?.parent(0)?.tree()?;
-    let head_tree = repo.find_commit(to.clone())?.tree()?;
+pub(crate) fn diff_oids(repo: &Repository, newest: Oid, oldest: Oid) -> anyhow::Result<String> {
+    let base_tree = repo.find_commit(oldest)?.parent(0)?.tree()?;
+    let head_tree = repo.find_commit(newest)?.tree()?;
 
     let mut opts = DiffOptions::new();
     opts.reverse(false)
         .force_text(true)
-        .ignore_whitespace_eol(false) // handy for "formatting"
+        .ignore_whitespace_eol(false)
         .ignore_whitespace_change(false)
         .ignore_whitespace(false)
         .include_ignored(false)

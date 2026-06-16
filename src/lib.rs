@@ -11,9 +11,10 @@ use std::{
     vec,
 };
 
-use git2::Repository;
+use git2::{Oid, Repository};
 use once_cell::sync::Lazy;
 use regex::Regex;
+use toml::Table;
 
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
@@ -22,7 +23,7 @@ pub use crate::git::is_repo_ready;
 
 use crate::{
     git::{
-        create_clog_commit, generate_diff_string, remove_last_release_commit, CommitWrapper,
+        create_clog_commit, generate_diff_for_window, remove_last_release_commit, CommitWrapper,
         GitHistory,
     },
     python::PyProject,
@@ -39,8 +40,7 @@ pub fn bump_project_version(
     config: &Config,
 ) -> anyhow::Result<()> {
     let history: Vec<CommitWrapper> = GitHistory::new(project, repo).collect();
-    let diff = generate_diff_string(repo, history.clone())?;
-    changelog::prepare_changelog(history.clone().into_iter(), &diff, project, config).unwrap();
+    changelog::prepare_changelog(history.clone().into_iter(), Some(repo), project, config).unwrap();
 
     let next_version = match get_next_version(history.into_iter(), config) {
         Some(v) => v,
@@ -57,8 +57,7 @@ pub fn make_stable_release(
     config: &Config,
 ) -> anyhow::Result<()> {
     let history: Vec<CommitWrapper> = GitHistory::new(project, repo).collect();
-    let diff = generate_diff_string(repo, history.clone())?;
-    changelog::prepare_changelog(history.clone().into_iter(), &diff, project, config).unwrap();
+    changelog::prepare_changelog(history.clone().into_iter(), Some(repo), project, config).unwrap();
     project.set_initial_release()?;
     project.update_project_file()?;
     create_clog_commit(repo, project, config, SemVer::version_1_0_0())
@@ -76,7 +75,8 @@ pub fn redo_release(
 pub fn preview_release(repo: &Repository, config: &Config) -> anyhow::Result<()> {
     let mut project = detect_project(config)?;
     let history: Vec<CommitWrapper> = GitHistory::new(project.as_mut(), repo).collect();
-    let diff = generate_diff_string(repo, history.clone())?;
+    let window: Vec<CommitWrapper> = iterate_to_last_version(history.into_iter()).collect();
+    let diff = generate_diff_for_window(repo, &window)?;
 
     let pager = repo
         .config()
@@ -129,15 +129,30 @@ pub struct Config {
     path: PathBuf,
     name: String,
     email: String,
+    pub summarizer_command: Option<String>,
 }
 
 impl Config {
     pub fn new<P: AsRef<std::path::Path>>(path: &P) -> Self {
-        Self {
-            path: path.as_ref().to_path_buf(),
-            patterns: Patterns::default(),
+        let path = path.as_ref().to_path_buf();
+        let mut config = Self {
+            path: path.clone(),
             ..Default::default()
+        };
+        if let Some(overrides) = Self::load_toml(&path) {
+            if let Some(cmd) = overrides
+                .get("summarizer_command")
+                .and_then(|v| v.as_str())
+            {
+                config.summarizer_command = Some(cmd.to_string());
+            }
         }
+        config
+    }
+
+    fn load_toml(path: &std::path::Path) -> Option<Table> {
+        let content = std::fs::read_to_string(path.join("clog.toml")).ok()?;
+        content.parse::<Table>().ok()
     }
 }
 
@@ -149,6 +164,7 @@ impl Default for Config {
             patterns: Patterns::default(),
             name: "clog-bot".to_string(),
             email: "clog-bot@local".to_string(),
+            summarizer_command: None,
         }
     }
 }
@@ -170,6 +186,7 @@ pub trait HistoryItem {
     fn message(&self) -> String;
     fn version(&self) -> SemVer;
     fn kind(&self) -> HistoryItemKind;
+    fn commit_id(&self) -> Option<Oid> { None }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

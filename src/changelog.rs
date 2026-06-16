@@ -1,6 +1,7 @@
-use std::{fs, io::Write};
+use std::{fs, io::Write, process::{Command, Stdio}};
 
 use anyhow::Ok;
+use git2::{Oid, Repository};
 
 use crate::{
     get_next_version,
@@ -19,26 +20,27 @@ enum ChangeLogEntry {
 
 pub fn prepare_changelog<T: Iterator<Item = CommitWrapper> + Clone>(
     history: T,
-    diff: &str,
+    repo: Option<&Repository>,
     project: &dyn Project,
     config: &Config,
 ) -> anyhow::Result<()> {
     let path = project.get_dir().join(project.get_changelog());
     if !path.exists() {
-        generate_entire_changelog(history, project, config)
+        generate_entire_changelog(history, repo, project, config)
     } else {
-        append_changelog(history, project, config)
+        append_changelog(history, repo, project, config)
     }
 }
 
 fn append_changelog<T: Iterator<Item = CommitWrapper> + Clone>(
     history: T,
+    repo: Option<&Repository>,
     project: &dyn Project,
     config: &Config,
 ) -> anyhow::Result<()> {
     let path = project.get_dir().join(project.get_changelog());
 
-    let changelog_entries = get_newest_changelog_items(history, config);
+    let changelog_entries = get_newest_changelog_items(history, repo, config)?;
     if changelog_entries.is_empty() {
         return Ok(());
     }
@@ -49,37 +51,37 @@ fn append_changelog<T: Iterator<Item = CommitWrapper> + Clone>(
     Ok(())
 }
 
-fn get_newest_changelog_items<T: Iterator<Item = CommitWrapper> + Clone>(
+fn get_newest_changelog_items<T: Iterator<Item = impl HistoryItem> + Clone>(
     history: T,
+    repo: Option<&Repository>,
     config: &Config,
-) -> Vec<ChangeLogEntry> {
+) -> anyhow::Result<Vec<ChangeLogEntry>> {
     let next_version = match get_next_version(history.clone(), config) {
         Some(v) => v,
-        None => return vec![],
+        None => return Ok(vec![]),
     };
+    let window: Vec<_> = iterate_to_last_version(history).collect();
+    let messages: Vec<String> = window.iter().map(|c| c.message()).collect();
+    let newest_oid = window.first().and_then(|c| c.commit_id());
+    let oldest_oid = window.last().and_then(|c| c.commit_id());
+    let diff = compute_diff(repo, newest_oid, oldest_oid)?;
+
+    let entries = get_entries_for_window(&messages, &diff, config)?;
     let mut changelog_entries = vec![ChangeLogEntry::BumpVersion(next_version)];
-    changelog_entries.extend(
-        iterate_to_last_version(history)
-            .filter_map(|c| get_changelog_message(&c, config))
-            .map(ChangeLogEntry::Entry),
-    );
-    changelog_entries
+    changelog_entries.extend(entries.into_iter().map(ChangeLogEntry::Entry));
+    Ok(changelog_entries)
 }
 
 fn generate_entire_changelog<T: Iterator<Item = CommitWrapper> + Clone>(
     history: T,
+    repo: Option<&Repository>,
     project: &dyn Project,
     config: &Config,
 ) -> anyhow::Result<()> {
-    // let history = GitHistory::new(project, repo).into_iter();
-    let changelog_entries = get_all_changelog_entries(history, config);
-
+    let changelog_entries = get_all_changelog_entries(history, repo, config)?;
     let changelog = render::render_changelog(&changelog_entries, config);
-
     let path = project.get_dir().join(project.get_changelog());
-
     let mut file = fs::File::create(path)?;
-
     file.write_all(changelog.as_bytes())
         .expect("failed to make changelog");
     Ok(())
@@ -87,26 +89,68 @@ fn generate_entire_changelog<T: Iterator<Item = CommitWrapper> + Clone>(
 
 fn get_all_changelog_entries<T: Iterator<Item = impl HistoryItem> + Clone>(
     history: T,
+    repo: Option<&Repository>,
     config: &Config,
-) -> Vec<ChangeLogEntry> {
-    let mut next_version = match get_next_version(history.clone(), config) {
+) -> anyhow::Result<Vec<ChangeLogEntry>> {
+    let mut bump_to = match get_next_version(history.clone(), config) {
         Some(v) => v,
-        None => return vec![],
+        None => return Ok(vec![]),
     };
+
     let mut changelog_entries = vec![];
+    let mut window_messages: Vec<String> = vec![];
+    let mut window_newest_oid: Option<Oid> = None;
+    let mut window_oldest_oid: Option<Oid> = None;
+    let mut window_version: Option<SemVer> = None;
+
     for commit in history.clone() {
-        if commit.version() != next_version {
-            changelog_entries.push(ChangeLogEntry::BumpVersion(next_version));
-            next_version = commit.version();
+        let cv = commit.version();
+        match &window_version {
+            None => {
+                window_version = Some(cv);
+            }
+            Some(v) if *v != cv => {
+                let diff = compute_diff(repo, window_newest_oid, window_oldest_oid)?;
+                changelog_entries.push(ChangeLogEntry::BumpVersion(bump_to));
+                let entries = get_entries_for_window(&window_messages, &diff, config)?;
+                changelog_entries.extend(entries.into_iter().map(ChangeLogEntry::Entry));
+                bump_to = v.clone();
+                window_messages.clear();
+                window_newest_oid = None;
+                window_version = Some(cv);
+            }
+            Some(_) => {}
         }
-        if let Some(s) = get_changelog_message(&commit, config) {
-            changelog_entries.push(ChangeLogEntry::Entry(s));
+        if window_newest_oid.is_none() {
+            window_newest_oid = commit.commit_id();
         }
+        window_oldest_oid = commit.commit_id();
+        window_messages.push(commit.message());
     }
-    if let Some(version) = find_first_version_of_project(history.clone()) {
+
+    if !window_messages.is_empty() {
+        let diff = compute_diff(repo, window_newest_oid, window_oldest_oid)?;
+        changelog_entries.push(ChangeLogEntry::BumpVersion(bump_to));
+        let entries = get_entries_for_window(&window_messages, &diff, config)?;
+        changelog_entries.extend(entries.into_iter().map(ChangeLogEntry::Entry));
+    }
+
+    if let Some(version) = find_first_version_of_project(history) {
         changelog_entries.push(ChangeLogEntry::InitialVersion(version));
     }
-    changelog_entries
+
+    Ok(changelog_entries)
+}
+
+fn compute_diff(
+    repo: Option<&Repository>,
+    newest: Option<Oid>,
+    oldest: Option<Oid>,
+) -> anyhow::Result<String> {
+    match (repo, newest, oldest) {
+        (Some(r), Some(n), Some(o)) => crate::git::diff_oids(r, n, o),
+        _ => Ok(String::new()),
+    }
 }
 
 fn find_first_version_of_project<T, H>(history: T) -> Option<SemVer>
@@ -117,26 +161,64 @@ where
     history.map(|c| c.version()).min()
 }
 
-fn get_changelog_message<T: HistoryItem>(commit: &T, config: &Config) -> Option<String> {
-    if let Some(s) = changelog_from_trailer_commit(commit) {
-        return Some(s);
-    }
-    changelog_from_conventional_commit(commit, config)
-}
-
-fn changelog_from_trailer_commit<T: HistoryItem>(commit: &T) -> Option<String> {
-    let bump = crate::get_bump_from_trailer(&commit.message());
-    if bump == SemVerBump::None {
-        None
-    } else {
-        commit.message().split("\n").next().map(|x| String::from(x))
-    }
-}
-
-fn changelog_from_conventional_commit<T: HistoryItem>(
-    commit: &T,
+fn get_entries_for_window(
+    messages: &[String],
+    diff: &str,
     config: &Config,
-) -> Option<String> {
+) -> anyhow::Result<Vec<String>> {
+    if let Some(command) = &config.summarizer_command {
+        run_summarizer(command, messages, diff)
+    } else {
+        Ok(messages
+            .iter()
+            .filter_map(|m| conventional_entry(m, config))
+            .collect())
+    }
+}
+
+fn run_summarizer(command: &str, messages: &[String], diff: &str) -> anyhow::Result<Vec<String>> {
+    let prompt = format!(
+        "Generate a concise changelog entry list for the following changes.\n\
+         Output one entry per line, no bullet points or numbering.\n\
+         Only include user-facing changes worth noting in a changelog.\n\
+         \n\
+         ## Commits\n\
+         {}\n\
+         \n\
+         ## Diff\n\
+         {}",
+        messages.join("\n"),
+        diff,
+    );
+
+    let mut child = Command::new("sh")
+        .arg("-c")
+        .arg(command)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()?;
+
+    child.stdin.as_mut().unwrap().write_all(prompt.as_bytes())?;
+    drop(child.stdin.take());
+
+    let output = child.wait_with_output()?;
+    if !output.status.success() {
+        anyhow::bail!("summarizer command failed with status {}", output.status);
+    }
+
+    Ok(String::from_utf8(output.stdout)?
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(String::from)
+        .collect())
+}
+
+fn conventional_entry(message: &str, config: &Config) -> Option<String> {
+    let bump = crate::get_bump_from_trailer(message);
+    if bump != SemVerBump::None {
+        return message.split('\n').next().map(String::from);
+    }
+
     let mut patterns = config
         .patterns
         .major
@@ -144,11 +226,9 @@ fn changelog_from_conventional_commit<T: HistoryItem>(
         .chain(&config.patterns.minor)
         .chain(&config.patterns.patch);
 
-    let message = commit.message();
-    let message = message.split("\n").next()?;
-
-    if patterns.any(|r| r.is_match(message)) {
-        Some(message.to_string())
+    let first_line = message.split('\n').next()?;
+    if patterns.any(|r| r.is_match(first_line)) {
+        Some(first_line.to_string())
     } else {
         None
     }
@@ -272,7 +352,7 @@ mod test {
         #[case] expected: Vec<ChangeLogEntry>,
     ) {
         let config = Config::default();
-        let changelog = get_all_changelog_entries(history.into_iter(), &config);
+        let changelog = get_all_changelog_entries(history.into_iter(), None, &config).unwrap();
         assert_eq!(expected, changelog);
     }
 }
