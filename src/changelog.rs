@@ -1,4 +1,4 @@
-use std::{fs, io::Write, process::{Command, Stdio}};
+use std::{fs, io::{BufRead, BufReader, Write}, process::{Command, Stdio}};
 
 use anyhow::Ok;
 use git2::{Oid, Repository};
@@ -191,26 +191,42 @@ fn run_summarizer(command: &str, messages: &[String], diff: &str) -> anyhow::Res
         diff,
     );
 
+    eprintln!("Running summarizer: {}", command);
+
     let mut child = Command::new("sh")
         .arg("-c")
         .arg(command)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .spawn()?;
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("Failed to launch summarizer '{}': {}", command, e))?;
 
-    child.stdin.as_mut().unwrap().write_all(prompt.as_bytes())?;
+    // Ignore broken pipe — if the command exits early due to an error, we'll
+    // catch the real cause via the exit status below.
+    let _ = child.stdin.as_mut().unwrap().write_all(prompt.as_bytes());
     drop(child.stdin.take());
 
-    let output = child.wait_with_output()?;
-    if !output.status.success() {
-        anyhow::bail!("summarizer command failed with status {}", output.status);
+    let mut entries = Vec::new();
+    let reader = BufReader::new(child.stdout.take().unwrap());
+    for line in reader.lines() {
+        let line = line?;
+        eprintln!("{}", line);
+        if !line.trim().is_empty() {
+            entries.push(line);
+        }
     }
 
-    Ok(String::from_utf8(output.stdout)?
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .map(String::from)
-        .collect())
+    let status = child.wait()?;
+    if !status.success() {
+        anyhow::bail!(
+            "Summarizer '{}' exited with status {}. \
+             Check your summarizer_command in clog.toml.",
+            command,
+            status
+        );
+    }
+
+    Ok(entries)
 }
 
 fn conventional_entry(message: &str, config: &Config) -> Option<String> {

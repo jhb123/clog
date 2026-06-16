@@ -40,7 +40,7 @@ pub fn bump_project_version(
     config: &Config,
 ) -> anyhow::Result<()> {
     let history: Vec<CommitWrapper> = GitHistory::new(project, repo).collect();
-    changelog::prepare_changelog(history.clone().into_iter(), Some(repo), project, config).unwrap();
+    changelog::prepare_changelog(history.clone().into_iter(), Some(repo), project, config)?;
 
     let next_version = match get_next_version(history.into_iter(), config) {
         Some(v) => v,
@@ -57,7 +57,7 @@ pub fn make_stable_release(
     config: &Config,
 ) -> anyhow::Result<()> {
     let history: Vec<CommitWrapper> = GitHistory::new(project, repo).collect();
-    changelog::prepare_changelog(history.clone().into_iter(), Some(repo), project, config).unwrap();
+    changelog::prepare_changelog(history.clone().into_iter(), Some(repo), project, config)?;
     project.set_initial_release()?;
     project.update_project_file()?;
     create_clog_commit(repo, project, config, SemVer::version_1_0_0())
