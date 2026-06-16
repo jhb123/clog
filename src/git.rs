@@ -223,7 +223,11 @@ pub fn generate_diff_for_window(
 }
 
 pub(crate) fn diff_oids(repo: &Repository, newest: Oid, oldest: Oid) -> anyhow::Result<String> {
-    let base_tree = repo.find_commit(oldest)?.parent(0)?.tree()?;
+    let oldest_commit = repo.find_commit(oldest)?;
+    let base_tree = match oldest_commit.parent(0) {
+        std::result::Result::Ok(parent) => parent.tree()?,
+        Err(_) => repo.find_tree(repo.treebuilder(None)?.write()?)?,
+    };
     let head_tree = repo.find_commit(newest)?.tree()?;
 
     let mut opts = DiffOptions::new();

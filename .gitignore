@@ -1,3 +1,4 @@
 /target
 test_repos/
 profile.json.gz
+clog.toml
