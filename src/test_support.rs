@@ -195,7 +195,7 @@ fn make_branch<'a, F>(repo: &'a Repository, name: &'a str, f: F) -> anyhow::Resu
 where
     F: FnOnce(&Repository) -> anyhow::Result<Oid>,
 {
-    // head can point to a tag, a branch refs/heads/main, or a detatched state
+    // head can point to a tag, a branch refs/heads/main, or a detached state
     // peel gives the commit to of whatever head points to
 
     let head = repo.head()?.peel_to_commit()?;
@@ -235,7 +235,7 @@ fn make_pyproject(path: &Path, version: Option<SemVer>) {
     if let Some(v) = version {
         data = data.replace("0.1.0", &v.to_string());
     }
-    fs::write(path, format!("{data}")).unwrap();
+    fs::write(path, &data).unwrap();
 }
 
 /// Create a commit with a message on the current branch

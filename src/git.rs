@@ -152,7 +152,7 @@ pub fn create_clog_commit(
     };
     let obj = repo.revparse_single("HEAD")?;
     let tag = format!("v{next_version}");
-    repo.tag(&tag, &obj, &sig,&format!("Release {next_version}"), true)?;
+    repo.tag(&tag, &obj, &sig, &format!("Release {next_version}"), true)?;
 
     Ok(())
 }

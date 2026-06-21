@@ -4,7 +4,7 @@ name: Cargo Build & Test
 on:
   push:
 
-env: 
+env:
   CARGO_TERM_COLOR: always
 
 jobs:
@@ -20,12 +20,12 @@ jobs:
 
   spelling:
     name: Spelling
-    runs-on: ubuntu-latest  
-    steps:    
+    runs-on: ubuntu-latest
+    steps:
     - uses: codespell-project/actions-codespell@v2
       with:
         check_filenames: true
-    
+
   build_and_test:
     name: Rust project - latest
     runs-on: ubuntu-latest

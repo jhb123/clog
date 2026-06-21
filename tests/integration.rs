@@ -13,7 +13,7 @@ use rstest::*;
 fn run_clog(dir: &TempDir) {
     cargo_bin_cmd!(pkg_name!())
         .arg("--yes")
-        .current_dir(&dir)
+        .current_dir(dir)
         .assert()
         .success()
         .stderr("");
@@ -23,7 +23,7 @@ fn run_clog_stable_release(dir: &TempDir) {
     cargo_bin_cmd!(pkg_name!())
         .arg("stable")
         .arg("--yes")
-        .current_dir(&dir)
+        .current_dir(dir)
         .assert()
         .success()
         .stderr("");
@@ -33,7 +33,7 @@ fn run_clog_redo(dir: &TempDir) {
     cargo_bin_cmd!(pkg_name!())
         .arg("redo")
         .arg("--yes")
-        .current_dir(&dir)
+        .current_dir(dir)
         .assert()
         .success()
         .stderr("");
@@ -43,7 +43,7 @@ fn run_clog_redo_fail(dir: &TempDir) {
     cargo_bin_cmd!(pkg_name!())
         .arg("redo")
         .arg("--yes")
-        .current_dir(&dir)
+        .current_dir(dir)
         .assert()
         .failure();
 }

@@ -244,7 +244,7 @@ mod test {
     }
 
     #[test]
-    fn test_build_version_does_not_affect_precedance() {
+    fn test_build_version_does_not_affect_precedence() {
         let v1 = SemVer::parse("1.0.0+build.1").unwrap();
         let v2 = SemVer::parse("1.0.0+build.2").unwrap();
         assert_eq!(v1, v2);
