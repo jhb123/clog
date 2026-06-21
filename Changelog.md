@@ -1,3 +1,5 @@
+# Version 0.8.0
+- clog now creates an annotated git tag (e.g. `v1.0.0`) automatically when committing a version bump
 # Version 0.7.0
 - Add `clog preview` command to view the diff for unreleased changes in a pager
 - Add LLM summarizer support via `summarizer_command` in `clog.toml` to generate changelog entries from commit messages and diffs
