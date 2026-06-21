@@ -140,10 +140,7 @@ impl Config {
             ..Default::default()
         };
         if let Some(overrides) = Self::load_toml(&path) {
-            if let Some(cmd) = overrides
-                .get("summarizer_command")
-                .and_then(|v| v.as_str())
-            {
+            if let Some(cmd) = overrides.get("summarizer_command").and_then(|v| v.as_str()) {
                 config.summarizer_command = Some(cmd.to_string());
             }
         }
@@ -186,7 +183,9 @@ pub trait HistoryItem {
     fn message(&self) -> String;
     fn version(&self) -> SemVer;
     fn kind(&self) -> HistoryItemKind;
-    fn commit_id(&self) -> Option<Oid> { None }
+    fn commit_id(&self) -> Option<Oid> {
+        None
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

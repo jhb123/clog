@@ -1,4 +1,8 @@
-use std::{fs, io::{BufRead, BufReader, Write}, process::{Command, Stdio}};
+use std::{
+    fs,
+    io::{BufRead, BufReader, Write},
+    process::{Command, Stdio},
+};
 
 use anyhow::Ok;
 use git2::{Oid, Repository};

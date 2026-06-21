@@ -115,7 +115,7 @@ pub fn create_clog_commit(
     next_version: SemVer,
 ) -> anyhow::Result<()> {
     let message = make_clog_commit_message(&project.get_version(), &next_version);
-    project.set_version(next_version);
+    project.set_version(next_version.clone());
     project.update_project_file()?;
     // get your user?
     let sig = match repo.signature() {
@@ -150,6 +150,9 @@ pub fn create_clog_commit(
     } else {
         repo.commit(Some("HEAD"), &sig, &sig, &message, &tree, &[])?;
     };
+    let obj = repo.revparse_single("HEAD")?;
+    let tag = format!("v{next_version}");
+    repo.tag(&tag, &obj, &sig,&format!("Release {next_version}"), true)?;
 
     Ok(())
 }
@@ -266,18 +269,19 @@ fn make_clog_commit_message(from: &SemVer, to: &SemVer) -> String {
 
 #[cfg(test)]
 mod test {
-    use assert_fs::TempDir;
-    use fs_extra::{copy_items, dir};
-    use git2::Repository;
-    use rstest::*;
+    use std::fs;
 
     use crate::{
         detect_project,
-        git::{make_clog_commit_message, CommitWrapper},
+        git::{create_clog_commit, make_clog_commit_message, CommitWrapper, CLOG_TRAILER},
         semver::SemVer,
         test_support::{empty_commit, init_python_repo_0_1_0},
         Config, HistoryItemKind,
     };
+    use assert_fs::TempDir;
+    use fs_extra::{copy_items, dir};
+    use git2::Repository;
+    use rstest::*;
 
     #[fixture]
     #[once]
@@ -328,5 +332,53 @@ mod test {
 
         let wrapper = CommitWrapper::parse_commit(project.as_ref(), &repo, commit).unwrap();
         assert_eq!(wrapper.kind, HistoryItemKind::ClogBump);
+    }
+
+    #[rstest]
+    fn test_clog_commit_tag(pre_stable_repo_dir: TempDir) {
+        let repo = Repository::open(&pre_stable_repo_dir).unwrap();
+        let config = Config::new(&pre_stable_repo_dir);
+        let mut project = detect_project(&config).unwrap();
+
+        // make an empty changelog - we aren't verifying this in the test
+        let changelog = pre_stable_repo_dir.join(project.get_changelog());
+        fs::File::create(&changelog).unwrap();
+
+        empty_commit(&repo, "feat: test commit\nthis is a test\ntrailer text").unwrap();
+        let version = SemVer::parse("1.0.0").unwrap();
+        create_clog_commit(&repo, project.as_mut(), &config, version.clone()).unwrap();
+
+        let head_oid = repo.head().unwrap().target().unwrap();
+
+        let tag_oid = repo
+            .revparse_single(&format!("refs/tags/v{version}^{{commit}}"))
+            .unwrap_or_else(|_| panic!("expected tag v{version} to exist"))
+            .id();
+
+        assert_eq!(tag_oid, head_oid, "tag {version} does not point to HEAD");
+    }
+
+    #[rstest]
+    fn test_clog_commit_message(pre_stable_repo_dir: TempDir) {
+        let repo = Repository::open(&pre_stable_repo_dir).unwrap();
+        let config = Config::new(&pre_stable_repo_dir);
+        let mut project = detect_project(&config).unwrap();
+
+        // make an empty changelog - we aren't verifying this in the test
+        let changelog = pre_stable_repo_dir.join(project.get_changelog());
+        fs::File::create(&changelog).unwrap();
+
+        empty_commit(&repo, "feat: test commit\nthis is a test\ntrailer text").unwrap();
+        let version = SemVer::parse("1.0.0").unwrap();
+        create_clog_commit(&repo, project.as_mut(), &config, version.clone()).unwrap();
+
+        let head_oid = repo.head().unwrap().target().unwrap();
+        let head_commit = repo.find_commit(head_oid).unwrap();
+
+        let message = head_commit.message().unwrap();
+        assert_eq!(
+            message,
+            format!("chore: bump version 0.1.0 -> {version}\n\n{CLOG_TRAILER}")
+        );
     }
 }
