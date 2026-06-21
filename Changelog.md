@@ -1,3 +1,12 @@
+# Version 0.7.0
+- Add `clog preview` command to view the diff for unreleased changes in a pager
+- Add LLM summarizer support via `summarizer_command` in `clog.toml` to generate changelog entries from commit messages and diffs
+- Show LLM summarizer output in real time while it runs
+- Add support for Poetry-style `pyproject.toml` files (`[tool.poetry]` version field)
+- Fix diff generation for repositories where the oldest commit in a window has no parent
+- Fix crash when the version file is absent in early git history
+- Pre-built binaries for macOS and Linux are now available on the GitHub releases page
+- Binary is now statically linked and self-contained — no system libgit2 required
 # Version 0.6.0
 - Add trailer commits to release notes
 - feat: make alias installation
